@@ -6,13 +6,20 @@
     <title>Mosaic: Mindful Puzzles</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
-      @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&display=swap');
+      @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=Playfair+Display:ital,wght@0,400;0,600;0,700;1,400&display=swap');
+      
       body {
         font-family: 'Inter', sans-serif;
         background-color: #f8fafc; /* Slate 50 */
+        color: #0f172a; /* Slate 900 */
         overflow: hidden; /* Prevent scrolling while dragging */
         touch-action: none;
       }
+      
+      h1, h2, h3, h4, h5, h6 {
+        font-family: 'Playfair Display', serif;
+      }
+
       /* Custom scrollbar for puzzle selection */
       .custom-scrollbar::-webkit-scrollbar {
         width: 6px;
@@ -23,6 +30,14 @@
       .custom-scrollbar::-webkit-scrollbar-thumb {
         background-color: #cbd5e1;
         border-radius: 20px;
+      }
+      
+      /* Utilities */
+      .glass-panel {
+        background: rgba(255, 255, 255, 0.7);
+        backdrop-filter: blur(12px);
+        -webkit-backdrop-filter: blur(12px);
+        border: 1px solid rgba(255, 255, 255, 0.5);
       }
     </style>
   <script type="importmap">

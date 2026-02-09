@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { Home, Puzzle, Settings, Image as ImageIcon, Sparkles, Clock, ArrowLeft, RotateCcw } from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import { Home, Puzzle, Settings, Image as ImageIcon, Sparkles, Clock, ArrowLeft, RotateCcw, Flame, Play, ChevronRight, Wand2, History, Layers, HelpCircle, X, MousePointer2, RotateCw, Shapes, Eye, Lightbulb, Zap } from 'lucide-react';
 import GameBoard from './components/GameBoard';
 import { generateImage } from './services/geminiService';
 import { GameState, Difficulty, PuzzleConfig, AppView, GeneratedImage } from './types';
@@ -11,6 +11,108 @@ const App: React.FC = () => {
   const [generatedImages, setGeneratedImages] = useState<GeneratedImage[]>([]);
   const [isGenerating, setIsGenerating] = useState(false);
   const [promptInput, setPromptInput] = useState('');
+  const [savedGameIds, setSavedGameIds] = useState<Set<string>>(new Set());
+  const [showHowToPlay, setShowHowToPlay] = useState(false);
+  
+  // Gallery State (starts with initial, extends with discoveries)
+  const [galleryPuzzles, setGalleryPuzzles] = useState<PuzzleConfig[]>(INITIAL_PUZZLES);
+  const [activeCategory, setActiveCategory] = useState<string>('All');
+  const initializationRef = useRef(false);
+
+  // Daily Streak State
+  const [streak, setStreak] = useState(0);
+
+  // Check for saved games
+  const checkForSavedGames = () => {
+      const saves = new Set<string>();
+      for (let i = 0; i < localStorage.length; i++) {
+          const key = localStorage.key(i);
+          if (key && key.startsWith('mosaic_save_')) {
+              const puzzleId = key.replace('mosaic_save_', '');
+              saves.add(puzzleId);
+          }
+      }
+      setSavedGameIds(saves);
+  };
+
+  // Initialize: Load streak & Add new daily discovery puzzle & Check saves
+  useEffect(() => {
+    // 0. Check Saves
+    checkForSavedGames();
+
+    // 1. Streak Logic
+    const storedStreak = parseInt(localStorage.getItem('mosaic_streak') || '0');
+    const lastWin = localStorage.getItem('mosaic_last_win');
+    const today = new Date().toDateString();
+    const yesterday = new Date(Date.now() - 86400000).toDateString();
+
+    if (lastWin && lastWin !== today && lastWin !== yesterday) {
+        setStreak(0);
+        localStorage.setItem('mosaic_streak', '0');
+    } else {
+        setStreak(storedStreak);
+    }
+
+    // 2. New Puzzle Discovery Logic (Run once per session/mount)
+    if (!initializationRef.current) {
+        initializationRef.current = true;
+        
+        const storedDiscoveriesStr = localStorage.getItem('mosaic_discoveries');
+        let storedDiscoveries: PuzzleConfig[] = storedDiscoveriesStr ? JSON.parse(storedDiscoveriesStr) : [];
+        
+        // Helper to extract picsum ID
+        const getPicsumId = (url: string) => {
+            const match = url.match(/\/id\/(\d+)\//);
+            return match ? parseInt(match[1]) : -1;
+        };
+
+        const usedIds = new Set<number>();
+        [...INITIAL_PUZZLES, ...storedDiscoveries].forEach(p => {
+            const id = getPicsumId(p.src);
+            if (id !== -1) usedIds.add(id);
+        });
+
+        // Try to find a new unique image ID
+        let newId = -1;
+        let attempts = 0;
+        while (attempts < 50) {
+            // Picsum IDs go up to ~1084, picking safe range
+            const candidate = Math.floor(Math.random() * 800) + 10; 
+            if (!usedIds.has(candidate)) {
+                newId = candidate;
+                break;
+            }
+            attempts++;
+        }
+
+        if (newId !== -1) {
+            const adjectives = ["Hidden", "Silent", "Cosmic", "Vibrant", "Misty", "Ancient", "Glass", "Neon", "Rustic", "Golden", "Ethereal", "Quiet", "Frozen", "Blooming"];
+            const nouns = ["Fragment", "Vista", "Echo", "Dream", "Horizon", "Oasis", "Whisper", "Journey", "Valley", "Light", "Shadow", "River", "Summit", "Harbor"];
+            const randomTitle = `${adjectives[Math.floor(Math.random() * adjectives.length)]} ${nouns[Math.floor(Math.random() * nouns.length)]}`;
+
+            const newPuzzle: PuzzleConfig = {
+                id: `discovery-${Date.now()}`,
+                title: randomTitle,
+                src: `https://picsum.photos/id/${newId}/800/800`,
+                difficulty: 'normal',
+                category: 'Discovery'
+            };
+
+            // Add new puzzle to the front of discoveries (newest first)
+            storedDiscoveries = [newPuzzle, ...storedDiscoveries];
+            localStorage.setItem('mosaic_discoveries', JSON.stringify(storedDiscoveries));
+        }
+
+        setGalleryPuzzles([...INITIAL_PUZZLES, ...storedDiscoveries]);
+    }
+  }, []);
+
+  // Update saved games when view changes (e.g. coming back from a game)
+  useEffect(() => {
+    if (currentView !== 'game') {
+        checkForSavedGames();
+    }
+  }, [currentView]);
 
   // AI Generation Handler
   const handleGeneratePuzzle = async () => {
@@ -43,137 +145,398 @@ const App: React.FC = () => {
 
   const handleBack = () => {
     if (currentView === 'game') {
-      // Confirm exit if game in progress? For MVP, just go back.
       setCurrentView('home');
       setSelectedPuzzle(null);
+      checkForSavedGames(); // Refresh saves list
     } else {
       setCurrentView('home');
     }
   };
+  
+  const handlePuzzleComplete = () => {
+     // Remove save file if exists
+     if (selectedPuzzle) {
+        localStorage.removeItem(`mosaic_save_${selectedPuzzle.id}`);
+     }
+     checkForSavedGames();
+
+     if (selectedPuzzle && selectedPuzzle.isDaily) {
+         const today = new Date().toDateString();
+         const lastWin = localStorage.getItem('mosaic_last_win');
+         
+         if (lastWin !== today) {
+             const yesterday = new Date(Date.now() - 86400000).toDateString();
+             const currentStored = parseInt(localStorage.getItem('mosaic_streak') || '0');
+             
+             let newStreak = 1;
+             if (lastWin === yesterday) {
+                 newStreak = currentStored + 1;
+             }
+             
+             setStreak(newStreak);
+             localStorage.setItem('mosaic_streak', newStreak.toString());
+             localStorage.setItem('mosaic_last_win', today);
+         }
+     }
+  };
+
+  const renderHowToPlay = () => (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-sm p-4 animate-in fade-in duration-200" onClick={() => setShowHowToPlay(false)}>
+      <div className="bg-white rounded-3xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto custom-scrollbar relative animate-in zoom-in-95 duration-200" onClick={(e) => e.stopPropagation()}>
+         {/* Close button */}
+         <button onClick={() => setShowHowToPlay(false)} className="absolute top-4 right-4 p-2 hover:bg-slate-100 rounded-full text-slate-500 transition-colors">
+           <X size={24} />
+         </button>
+         
+         <div className="p-8 md:p-10">
+           <div className="flex items-center gap-3 mb-8">
+              <div className="bg-indigo-100 p-3 rounded-xl text-indigo-600">
+                  <HelpCircle size={32} />
+              </div>
+              <h2 className="text-3xl font-serif text-slate-800">How to Play</h2>
+           </div>
+  
+           <div className="space-y-8">
+              <section>
+                  <h3 className="text-lg font-bold text-slate-800 mb-3 flex items-center gap-2">
+                      <MousePointer2 size={20} className="text-indigo-500"/> The Basics
+                  </h3>
+                  <p className="text-slate-600 leading-relaxed text-lg">
+                      Drag and drop pieces to reconstruct the image. When a piece is close to its correct position (and rotation), it will <strong className="text-indigo-600">snap</strong> and lock into place.
+                  </p>
+              </section>
+  
+              <section className="grid md:grid-cols-2 gap-6">
+                  <div className="bg-slate-50 p-6 rounded-2xl border border-slate-100">
+                       <h3 className="font-bold text-slate-800 mb-3 flex items-center gap-2">
+                          <RotateCw size={18} className="text-orange-500"/> Rotation
+                       </h3>
+                       <p className="text-slate-600">
+                          In <strong>Hard</strong> and <strong>Expert</strong> difficulties, pieces may need to be rotated.
+                          <br/><br/>
+                          <span className="font-medium text-slate-900">Right-click</span> or <span className="font-medium text-slate-900">Double-tap</span> a piece to rotate it 90 degrees.
+                       </p>
+                  </div>
+                  
+                   <div className="bg-slate-50 p-6 rounded-2xl border border-slate-100">
+                       <h3 className="font-bold text-slate-800 mb-3 flex items-center gap-2">
+                          <Shapes size={18} className="text-emerald-500"/> Styles
+                       </h3>
+                       <p className="text-slate-600">
+                          Customize your experience using the top bar dropdown:
+                          <br/><br/>
+                          <strong>Grid</strong> for classic square cuts.<br/>
+                          <strong>Mosaic</strong> for organic, curvy shapes.
+                       </p>
+                  </div>
+              </section>
+  
+              <section>
+                   <h3 className="text-lg font-bold text-slate-800 mb-4">Tools & Features</h3>
+                   <ul className="space-y-4">
+                      <li className="flex items-start gap-4">
+                          <div className="bg-indigo-50 p-2.5 rounded-xl text-indigo-600 mt-0.5"><Eye size={20} /></div>
+                          <div>
+                              <span className="font-bold text-slate-800 block">Preview</span>
+                              <span className="text-slate-500">Hold the eye button to peek at the completed image.</span>
+                          </div>
+                      </li>
+                      <li className="flex items-start gap-4">
+                          <div className="bg-amber-50 p-2.5 rounded-xl text-amber-600 mt-0.5"><Lightbulb size={20} /></div>
+                          <div>
+                              <span className="font-bold text-slate-800 block">Hint</span>
+                              <span className="text-slate-500">Highlights a random loose piece and shows you exactly where it belongs.</span>
+                          </div>
+                      </li>
+                      <li className="flex items-start gap-4">
+                          <div className="bg-slate-100 p-2.5 rounded-xl text-slate-600 mt-0.5"><Zap size={20} /></div>
+                          <div>
+                              <span className="font-bold text-slate-800 block">Chaos Mode</span>
+                              <span className="text-slate-500">Toggle this to make loose pieces drift slowly around the board for a dynamic challenge.</span>
+                          </div>
+                      </li>
+                   </ul>
+              </section>
+           </div>
+           
+           <div className="mt-10 pt-6 border-t border-slate-100 flex justify-end">
+              <button onClick={() => setShowHowToPlay(false)} className="px-8 py-3.5 bg-slate-900 text-white rounded-xl font-medium hover:bg-slate-800 transition-colors shadow-lg shadow-slate-900/10">
+                  Got it, let's play!
+              </button>
+           </div>
+         </div>
+      </div>
+    </div>
+  );
 
   const renderHome = () => (
-    <div className="flex flex-col h-screen w-full max-w-4xl mx-auto p-6">
-      <header className="mb-8 text-center space-y-2">
-        <h1 className="text-4xl font-light tracking-tight text-slate-800">Mosaic</h1>
-        <p className="text-slate-500">Mindful Puzzles & Spatial Logic</p>
+    <div className="flex flex-col min-h-screen w-full max-w-5xl mx-auto p-6 lg:p-12 relative">
+      {/* Background Decorative Elements */}
+      <div className="fixed top-0 left-0 w-full h-full overflow-hidden -z-10 pointer-events-none">
+          <div className="absolute top-[-10%] right-[-5%] w-[500px] h-[500px] rounded-full bg-indigo-100/50 blur-3xl"></div>
+          <div className="absolute bottom-[-10%] left-[-10%] w-[600px] h-[600px] rounded-full bg-rose-50/50 blur-3xl"></div>
+      </div>
+
+      <button 
+        onClick={() => setShowHowToPlay(true)}
+        className="absolute top-6 right-6 lg:top-10 lg:right-10 p-3 bg-white/80 backdrop-blur-sm hover:bg-white text-slate-600 rounded-full shadow-sm border border-slate-200 transition-all z-10 group"
+        title="How to Play"
+      >
+        <HelpCircle size={24} className="group-hover:text-indigo-600 transition-colors" />
+      </button>
+
+      <header className="mb-12 text-center space-y-3 pt-8">
+        <h1 className="text-6xl font-medium tracking-tight text-slate-900 drop-shadow-sm">Mosaic</h1>
+        <p className="text-slate-500 text-lg font-light tracking-wide">Find your peace, piece by piece.</p>
       </header>
 
-      {/* Main Mode Selection */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-10">
-        <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100 hover:shadow-md transition-shadow cursor-pointer"
-             onClick={() => setCurrentView('gallery')}>
-          <div className="h-12 w-12 bg-indigo-50 text-indigo-600 rounded-xl flex items-center justify-center mb-4">
-            <ImageIcon size={24} />
-          </div>
-          <h2 className="text-xl font-medium text-slate-800">Classic Gallery</h2>
-          <p className="text-slate-500 text-sm mt-1">Explore a curated collection of beautiful imagery.</p>
-        </div>
+      {/* Daily Challenge Banner */}
+      <div className="mb-12">
+        <div 
+            className="group relative overflow-hidden rounded-3xl cursor-pointer shadow-xl shadow-orange-900/10 transition-all duration-500 hover:shadow-2xl hover:shadow-orange-900/20 hover:-translate-y-1"
+            onClick={() => startPuzzle({ ...INITIAL_PUZZLES[0], difficulty: 'normal', isDaily: true })}
+        >
+            <div className="absolute inset-0 bg-gradient-to-br from-amber-500 to-orange-600 transition-transform duration-700 group-hover:scale-105"></div>
+            <div className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/cubes.png')] opacity-10"></div>
+            
+            <div className="relative p-8 md:p-10 flex flex-col md:flex-row items-center justify-between gap-6">
+                <div className="text-center md:text-left text-white">
+                    <div className="flex items-center justify-center md:justify-start gap-2 mb-3">
+                        <div className="bg-white/20 backdrop-blur-sm p-1.5 rounded-lg">
+                            <Clock size={18} className="text-white" />
+                        </div>
+                        <span className="text-sm font-bold uppercase tracking-widest text-orange-50">Daily Challenge</span>
+                    </div>
+                    <h3 className="text-3xl font-serif italic mb-2">Golden Hour in Kyoto</h3>
+                    <p className="text-orange-100 font-light max-w-md">Complete today's puzzle to keep your mindfulness streak alive.</p>
+                </div>
 
-        <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100 hover:shadow-md transition-shadow cursor-pointer"
-             onClick={() => setCurrentView('create')}>
-          <div className="h-12 w-12 bg-emerald-50 text-emerald-600 rounded-xl flex items-center justify-center mb-4">
-            <Sparkles size={24} />
-          </div>
-          <h2 className="text-xl font-medium text-slate-800">AI Studio</h2>
-          <p className="text-slate-500 text-sm mt-1">Describe a scene and let Gemini create a unique puzzle.</p>
+                <div className="flex items-center gap-6">
+                    {streak > 0 && (
+                        <div className="flex flex-col items-center bg-white/10 backdrop-blur-md rounded-2xl p-3 min-w-[80px] border border-white/10">
+                            <div className="flex items-center gap-1 text-white font-bold text-2xl">
+                                <Flame size={24} className="fill-orange-300 text-orange-300 animate-pulse" />
+                                <span>{streak}</span>
+                            </div>
+                            <span className="text-[10px] text-orange-100 uppercase tracking-wide font-medium">Streak</span>
+                        </div>
+                    )}
+                    <button className="bg-white text-orange-600 px-8 py-3 rounded-full font-semibold shadow-lg hover:bg-orange-50 transition-colors flex items-center gap-2">
+                        <Play size={18} className="fill-orange-600" /> Play Now
+                    </button>
+                </div>
+            </div>
         </div>
       </div>
 
-      {/* Daily Challenge (Mockup) */}
-      <div className="bg-gradient-to-r from-amber-50 to-orange-50 p-6 rounded-2xl border border-orange-100 flex items-center justify-between cursor-pointer hover:opacity-90 transition-opacity"
-           onClick={() => startPuzzle({ ...INITIAL_PUZZLES[0], difficulty: 'normal' })}>
-        <div>
-          <div className="flex items-center gap-2 mb-1">
-            <Clock size={16} className="text-orange-600" />
-            <span className="text-xs font-bold uppercase tracking-wider text-orange-600">Daily Challenge</span>
+      {/* Main Mode Selection */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+        {/* Gallery Card */}
+        <div className="group bg-white p-8 rounded-3xl shadow-sm border border-slate-100 transition-all duration-300 hover:shadow-xl hover:-translate-y-1 hover:border-indigo-100 cursor-pointer relative overflow-hidden"
+             onClick={() => setCurrentView('gallery')}>
+          <div className="absolute top-0 right-0 p-8 opacity-5 group-hover:opacity-10 transition-opacity transform group-hover:scale-110 duration-700">
+              <ImageIcon size={120} />
           </div>
-          <h3 className="text-lg font-medium text-slate-800">Golden Hour in Kyoto</h3>
+          
+          <div className="h-14 w-14 bg-indigo-50 text-indigo-600 rounded-2xl flex items-center justify-center mb-6 shadow-inner group-hover:bg-indigo-600 group-hover:text-white transition-colors duration-300">
+            <ImageIcon size={28} />
+          </div>
+          <h2 className="text-2xl font-medium text-slate-800 mb-2">Classic Gallery</h2>
+          <p className="text-slate-500 leading-relaxed mb-6">Browse our curated collection of high-resolution photography and art.</p>
+          <div className="flex items-center text-indigo-600 font-medium group-hover:translate-x-2 transition-transform">
+              Explore Collection <ChevronRight size={18} />
+          </div>
         </div>
-        <button className="bg-white text-orange-600 px-4 py-2 rounded-lg text-sm font-medium shadow-sm">Play</button>
+
+        {/* AI Studio Card */}
+        <div className="group bg-white p-8 rounded-3xl shadow-sm border border-slate-100 transition-all duration-300 hover:shadow-xl hover:-translate-y-1 hover:border-emerald-100 cursor-pointer relative overflow-hidden"
+             onClick={() => setCurrentView('create')}>
+          <div className="absolute top-0 right-0 p-8 opacity-5 group-hover:opacity-10 transition-opacity transform group-hover:scale-110 duration-700">
+              <Sparkles size={120} />
+          </div>
+
+          <div className="h-14 w-14 bg-emerald-50 text-emerald-600 rounded-2xl flex items-center justify-center mb-6 shadow-inner group-hover:bg-emerald-600 group-hover:text-white transition-colors duration-300">
+            <Wand2 size={28} />
+          </div>
+          <h2 className="text-2xl font-medium text-slate-800 mb-2">AI Studio</h2>
+          <p className="text-slate-500 leading-relaxed mb-6">Turn your imagination into a playable puzzle with the power of Gemini.</p>
+          <div className="flex items-center text-emerald-600 font-medium group-hover:translate-x-2 transition-transform">
+              Create New <ChevronRight size={18} />
+          </div>
+        </div>
       </div>
     </div>
   );
 
-  const renderGallery = () => (
-    <div className="h-screen flex flex-col p-6 max-w-5xl mx-auto w-full">
-      <div className="flex items-center gap-4 mb-6">
-        <button onClick={handleBack} className="p-2 hover:bg-slate-100 rounded-full transition-colors">
-          <ArrowLeft size={24} className="text-slate-600" />
-        </button>
-        <h2 className="text-2xl font-light text-slate-800">Puzzle Gallery</h2>
+  const renderGallery = () => {
+    // Filter categories
+    const categories = ['All', 'Nature', 'Urban', 'Spring', 'Summer', 'Autumn', 'Winter', 'Indoor', 'Discovery'];
+    
+    const filteredPuzzles = galleryPuzzles.filter(p => {
+        if (activeCategory === 'All') return true;
+        if (activeCategory === 'Discovery') return p.id.startsWith('discovery-');
+        return p.category === activeCategory;
+    });
+
+    return (
+    <div className="min-h-screen flex flex-col p-6 lg:p-10 max-w-7xl mx-auto w-full relative">
+      <div className="fixed top-0 left-0 w-full h-full bg-slate-50 -z-10"></div>
+      
+      <div className="flex flex-col md:flex-row md:items-center justify-between mb-8 gap-6">
+        <div className="flex items-center gap-4">
+            <button onClick={handleBack} className="p-3 bg-white hover:bg-slate-100 rounded-full shadow-sm border border-slate-100 transition-colors group">
+            <ArrowLeft size={24} className="text-slate-600 group-hover:text-slate-900" />
+            </button>
+            <div>
+                <h2 className="text-3xl text-slate-800">Puzzle Gallery</h2>
+                <p className="text-slate-500 text-sm">Select a masterpiece to begin</p>
+            </div>
+        </div>
+
+        {/* Category Filters */}
+        <div className="flex items-center gap-2 overflow-x-auto pb-2 md:pb-0 custom-scrollbar max-w-full">
+            {categories.map(cat => (
+                <button 
+                    key={cat}
+                    onClick={() => setActiveCategory(cat)}
+                    className={`px-4 py-2 rounded-full text-sm font-medium transition-all whitespace-nowrap ${
+                        activeCategory === cat 
+                        ? 'bg-slate-800 text-white shadow-md' 
+                        : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-50'
+                    }`}
+                >
+                    {cat}
+                </button>
+            ))}
+        </div>
       </div>
 
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 overflow-y-auto custom-scrollbar pb-10">
-        {INITIAL_PUZZLES.map((puzzle) => (
+      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6 overflow-y-auto custom-scrollbar pb-20">
+        {filteredPuzzles.map((puzzle, index) => {
+          const hasSave = savedGameIds.has(puzzle.id);
+          return (
           <div key={puzzle.id} 
                onClick={() => startPuzzle(puzzle)}
-               className="group relative aspect-square rounded-xl overflow-hidden cursor-pointer shadow-sm hover:shadow-lg transition-all">
-            <img src={puzzle.src} alt={puzzle.title} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" />
-            <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent opacity-0 group-hover:opacity-100 transition-opacity flex flex-col justify-end p-4">
-              <span className="text-white font-medium">{puzzle.title}</span>
-              <span className="text-white/80 text-xs">Classic Collection</span>
+               style={{ animationDelay: `${index * 50}ms` }}
+               className="group relative aspect-[4/5] rounded-2xl overflow-hidden cursor-pointer shadow-sm hover:shadow-2xl hover:-translate-y-2 transition-all duration-500 animate-in fade-in slide-in-from-bottom-4 fill-mode-backwards bg-white">
+            <img src={puzzle.src} alt={puzzle.title} className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-110" />
+            
+            <div className="absolute inset-0 bg-gradient-to-t from-slate-900/80 via-transparent to-transparent opacity-60 group-hover:opacity-80 transition-opacity"></div>
+            
+            <div className="absolute bottom-0 left-0 w-full p-6 translate-y-2 group-hover:translate-y-0 transition-transform duration-300">
+              <div className="flex flex-wrap gap-2 mb-2">
+                {hasSave ? (
+                    <span className="inline-flex items-center gap-1 px-2 py-1 rounded bg-amber-500/90 backdrop-blur-md text-white text-[10px] font-bold uppercase tracking-wider shadow-sm">
+                        <History size={10} /> Resume
+                    </span>
+                ) : (
+                    <span className="inline-block px-2 py-1 rounded bg-white/20 backdrop-blur-md text-white/90 text-[10px] font-bold uppercase tracking-wider border border-white/10">
+                        {puzzle.category || 'Classic'}
+                    </span>
+                )}
+                {puzzle.difficulty && (
+                    <span className={`inline-block px-2 py-1 rounded backdrop-blur-md text-white/90 text-[10px] font-bold uppercase tracking-wider border border-white/10 ${
+                        puzzle.difficulty === 'easy' ? 'bg-green-500/30' : 
+                        puzzle.difficulty === 'normal' ? 'bg-blue-500/30' : 
+                        puzzle.difficulty === 'hard' ? 'bg-orange-500/30' : 'bg-red-500/30'
+                    }`}>
+                        {puzzle.difficulty}
+                    </span>
+                )}
+              </div>
+              <h3 className="text-white font-serif text-xl italic leading-tight">{puzzle.title}</h3>
+            </div>
+            
+            <div className="absolute top-4 right-4 bg-white/90 backdrop-blur-md h-10 w-10 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transform scale-50 group-hover:scale-100 transition-all duration-300 shadow-lg">
+                <Play size={18} className="fill-indigo-600 text-indigo-600 ml-0.5" />
             </div>
           </div>
-        ))}
+        )})}
       </div>
     </div>
   );
+  };
 
   const renderCreate = () => (
-    <div className="h-screen flex flex-col p-6 max-w-4xl mx-auto w-full">
-      <div className="flex items-center gap-4 mb-6">
-        <button onClick={handleBack} className="p-2 hover:bg-slate-100 rounded-full transition-colors">
-          <ArrowLeft size={24} className="text-slate-600" />
+    <div className="min-h-screen flex flex-col p-6 lg:p-10 max-w-6xl mx-auto w-full">
+      <div className="flex items-center gap-4 mb-8">
+        <button onClick={handleBack} className="p-3 bg-white hover:bg-slate-100 rounded-full shadow-sm border border-slate-100 transition-colors group">
+          <ArrowLeft size={24} className="text-slate-600 group-hover:text-slate-900" />
         </button>
-        <h2 className="text-2xl font-light text-slate-800">AI Puzzle Studio</h2>
+        <div>
+            <h2 className="text-3xl text-slate-800">AI Puzzle Studio</h2>
+            <p className="text-slate-500 text-sm">Powered by Gemini</p>
+        </div>
       </div>
 
-      <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100 mb-8">
-        <label className="block text-sm font-medium text-slate-700 mb-2">What kind of puzzle should we build?</label>
-        <div className="flex gap-2">
+      <div className="bg-white p-8 lg:p-10 rounded-3xl shadow-lg border border-indigo-50/50 mb-12 relative overflow-hidden">
+        <div className="absolute top-0 right-0 w-64 h-64 bg-indigo-50 rounded-full blur-3xl -mr-16 -mt-16 pointer-events-none"></div>
+        
+        <label className="block text-lg font-serif italic text-slate-700 mb-4 relative z-10">What kind of puzzle should we dream up?</label>
+        <div className="flex flex-col md:flex-row gap-4 relative z-10">
           <input 
             type="text" 
             value={promptInput}
             onChange={(e) => setPromptInput(e.target.value)}
-            placeholder="E.g., A futuristic city in the clouds, painted in watercolor..."
-            className="flex-1 px-4 py-3 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-slate-50"
+            placeholder="E.g., A cozy library with flying books, warm lighting, highly detailed..."
+            className="flex-1 px-6 py-4 rounded-2xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-slate-50 text-slate-800 shadow-inner text-lg placeholder:text-slate-400"
             onKeyDown={(e) => e.key === 'Enter' && handleGeneratePuzzle()}
           />
           <button 
             onClick={handleGeneratePuzzle}
             disabled={isGenerating || !promptInput}
-            className={`px-6 py-3 rounded-xl font-medium text-white flex items-center gap-2 transition-all ${
-              isGenerating ? 'bg-indigo-300' : 'bg-indigo-600 hover:bg-indigo-700 shadow-md hover:shadow-lg'
+            className={`px-8 py-4 rounded-2xl font-medium text-white flex items-center justify-center gap-3 transition-all min-w-[160px] ${
+              isGenerating 
+                ? 'bg-indigo-300 cursor-wait' 
+                : 'bg-indigo-600 hover:bg-indigo-700 shadow-lg hover:shadow-indigo-500/30 hover:-translate-y-0.5'
             }`}
           >
             {isGenerating ? (
-              <>Generating...</>
+              <>
+                <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
+                <span>Dreaming...</span>
+              </>
             ) : (
-              <><Sparkles size={18} /> Create</>
+              <><Sparkles size={20} /> Generate</>
             )}
           </button>
         </div>
       </div>
 
-      <h3 className="text-lg font-medium text-slate-700 mb-4">Your Creations</h3>
+      <div className="flex items-center gap-3 mb-6">
+        <Sparkles size={20} className="text-indigo-500" />
+        <h3 className="text-xl font-medium text-slate-800">Your Creations</h3>
+      </div>
+      
       {generatedImages.length === 0 ? (
-        <div className="flex-1 flex flex-col items-center justify-center text-slate-400 border-2 border-dashed border-slate-200 rounded-2xl">
-          <ImageIcon size={48} className="mb-4 opacity-50" />
-          <p>No generated puzzles yet.</p>
+        <div className="flex-1 flex flex-col items-center justify-center text-slate-400 border-2 border-dashed border-slate-200 rounded-3xl p-12 bg-slate-50/50">
+          <div className="w-20 h-20 bg-slate-100 rounded-full flex items-center justify-center mb-4">
+             <ImageIcon size={32} className="opacity-40" />
+          </div>
+          <p className="text-lg">No generated puzzles yet.</p>
+          <p className="text-sm opacity-70">Enter a prompt above to get started.</p>
         </div>
       ) : (
-        <div className="grid grid-cols-2 md:grid-cols-3 gap-4 overflow-y-auto custom-scrollbar pb-10">
-          {generatedImages.map((img) => (
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6 overflow-y-auto custom-scrollbar pb-10">
+          {generatedImages.map((img, index) => {
+            const hasSave = savedGameIds.has(img.id);
+            return (
             <div key={img.id} 
                  onClick={() => startPuzzle({ id: img.id, src: img.src, title: img.title, difficulty: 'normal' })}
-                 className="group relative aspect-square rounded-xl overflow-hidden cursor-pointer shadow-sm hover:shadow-lg transition-all">
-              <img src={img.src} alt={img.title} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" />
-              <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent flex flex-col justify-end p-4">
-                <span className="text-white font-medium truncate">{img.title}</span>
-                <span className="text-indigo-200 text-xs flex items-center gap-1"><Sparkles size={10} /> AI Generated</span>
+                 className="group relative aspect-square rounded-2xl overflow-hidden cursor-pointer shadow-sm hover:shadow-xl hover:-translate-y-1 transition-all duration-300 bg-white animate-in fade-in zoom-in-95"
+                 style={{ animationDelay: `${index * 100}ms` }}>
+              <img src={img.src} alt={img.title} className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-105" />
+              <div className="absolute inset-0 bg-gradient-to-t from-indigo-900/80 via-transparent to-transparent flex flex-col justify-end p-5 opacity-0 group-hover:opacity-100 transition-opacity duration-300">
+                {hasSave && (
+                   <span className="inline-flex items-center gap-1 px-2 py-1 rounded bg-amber-500/90 backdrop-blur-md text-white text-[10px] font-bold uppercase tracking-wider mb-2 shadow-sm w-fit">
+                      <History size={10} /> Resume
+                   </span>
+                )}
+                <span className="text-white font-medium truncate w-full text-lg font-serif">{img.title}</span>
+                <span className="text-indigo-200 text-xs flex items-center gap-1.5 mt-1 font-medium"><Sparkles size={12} /> AI Generated</span>
               </div>
             </div>
-          ))}
+          )})}
         </div>
       )}
     </div>
@@ -187,9 +550,11 @@ const App: React.FC = () => {
       {currentView === 'game' && selectedPuzzle && (
         <GameBoard 
           puzzle={selectedPuzzle} 
-          onExit={handleBack} 
+          onExit={handleBack}
+          onComplete={handlePuzzleComplete}
         />
       )}
+      {showHowToPlay && renderHowToPlay()}
     </div>
   );
 };
