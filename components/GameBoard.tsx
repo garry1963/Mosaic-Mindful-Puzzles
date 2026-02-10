@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { X, RotateCw, Image as ImageIcon, Eye, Award, ChevronDown, Lightbulb, Clock, RotateCcw } from 'lucide-react';
 import { PuzzleConfig, Piece, Difficulty, PuzzleStyle, SavedGameState } from '../types';
 import { createPuzzlePieces } from '../utils/puzzleUtils';
@@ -28,7 +28,7 @@ const GameBoard: React.FC<GameBoardProps> = ({ puzzle, onExit, onComplete }) => 
   const boardRef = useRef<HTMLDivElement>(null);
   const pieceRefs = useRef<Record<number, HTMLDivElement | null>>({});
   
-  // Optimized Drag State
+  // Drag State (Mutable ref to avoid re-renders)
   const dragRef = useRef<{
     active: boolean;
     pieceId: number | null;
@@ -39,6 +39,7 @@ const GameBoard: React.FC<GameBoardProps> = ({ puzzle, onExit, onComplete }) => 
     groupCache: { id: number; el: HTMLDivElement; rotation: number }[];
     startPositions: Record<number, {x: number, y: number}>;
     startTime: number;
+    initialPieces: Piece[]; // Snapshot of state for logic
   }>({
     active: false,
     pieceId: null,
@@ -48,7 +49,8 @@ const GameBoard: React.FC<GameBoardProps> = ({ puzzle, onExit, onComplete }) => 
     currentY: 0,
     groupCache: [],
     startPositions: {},
-    startTime: 0
+    startTime: 0,
+    initialPieces: []
   });
 
   const rafRef = useRef<number | null>(null);
@@ -149,6 +151,10 @@ const GameBoard: React.FC<GameBoardProps> = ({ puzzle, onExit, onComplete }) => 
             localStorage.setItem(`mosaic_save_${puzzle.id}`, JSON.stringify(saveState));
           }
           if (rafRef.current) cancelAnimationFrame(rafRef.current);
+          
+          // Ensure we cleanup any global listeners if component unmounts mid-drag
+          window.removeEventListener('pointermove', handleWindowPointerMove);
+          window.removeEventListener('pointerup', handleWindowPointerUp);
       };
   }, [pieces, difficulty, style, elapsedTime, isComplete, hintsRemaining]);
 
@@ -190,85 +196,44 @@ const GameBoard: React.FC<GameBoardProps> = ({ puzzle, onExit, onComplete }) => 
       const dx = currentX - startX;
       const dy = currentY - startY;
 
-      // Batch DOM updates
+      // Update transforms
       for (let i = 0; i < groupCache.length; i++) {
           const item = groupCache[i];
-          // Use translate3d for hardware acceleration
-          item.el.style.transform = `translate3d(${dx}px, ${dy}px, 0) rotate(${item.rotation}deg) scale(1.05)`;
+          // Use translate3d for GPU acceleration
+          // Keep scale minimal to avoid blurriness, but enough for feedback
+          item.el.style.transform = `translate3d(${dx}px, ${dy}px, 0) rotate(${item.rotation}deg) scale(1.02)`;
       }
       
       rafRef.current = requestAnimationFrame(updateDragVisuals);
   };
 
-  // --- Pointer Handlers ---
-
-  const handlePointerDown = (e: React.PointerEvent, piece: Piece) => {
-    if (e.button !== 0 || piece.isLocked || isComplete) return;
-    
-    // Explicitly capture pointer to ensure we get moves even if cursor leaves element
-    e.currentTarget.setPointerCapture(e.pointerId);
-    
-    // 1. Prepare Group Cache
-    // Find all pieces in this group and cache their element references and rotations
-    // This avoids O(N) lookups during the move loop
-    const groupMembers = pieces.filter(p => p.groupId === piece.groupId);
-    const groupCache: { id: number; el: HTMLDivElement; rotation: number }[] = [];
-    const startPositions: Record<number, {x: number, y: number}> = {};
-    
-    groupMembers.forEach(p => {
-        const el = pieceRefs.current[p.id];
-        if (el) {
-            groupCache.push({ id: p.id, el, rotation: p.rotation });
-            startPositions[p.id] = { x: p.currentX, y: p.currentY };
-            
-            // Initial Visual State
-            el.style.transition = 'none';
-            el.style.zIndex = '100';
-            el.style.cursor = 'grabbing';
-            // Use simple box-shadow instead of SVG filter for performance
-            el.style.boxShadow = '0 10px 25px rgba(0,0,0,0.3)';
-            // Initial transform setup
-            el.style.transform = `rotate(${p.rotation}deg) scale(1.05)`;
-            el.style.willChange = 'transform'; // Hint to browser
-        }
-    });
-
-    // 2. Initialize Drag State
-    dragRef.current = {
-        active: true,
-        pieceId: piece.id,
-        startX: e.clientX,
-        startY: e.clientY,
-        currentX: e.clientX,
-        currentY: e.clientY,
-        groupCache,
-        startPositions,
-        startTime: Date.now()
-    };
-
-    // 3. Start Animation Loop
-    if (rafRef.current) cancelAnimationFrame(rafRef.current);
-    rafRef.current = requestAnimationFrame(updateDragVisuals);
-  };
-
-  const handlePointerMove = (e: React.PointerEvent) => {
+  // --- Window Event Handlers ---
+  // Defined outside useEffect to be stable, but they rely on dragRef which is mutable
+  
+  const handleWindowPointerMove = (e: PointerEvent) => {
     if (!dragRef.current.active) return;
-    
-    // Just update coordinates, the rAF loop handles the heavy lifting
+    e.preventDefault(); // prevent scrolling
     dragRef.current.currentX = e.clientX;
     dragRef.current.currentY = e.clientY;
   };
 
-  const handlePointerUp = (e: React.PointerEvent) => {
+  const handleWindowPointerUp = (e: PointerEvent) => {
     if (!dragRef.current.active) return;
     
-    e.currentTarget.releasePointerCapture(e.pointerId);
+    // 1. Cleanup Listeners & Board State
+    window.removeEventListener('pointermove', handleWindowPointerMove);
+    window.removeEventListener('pointerup', handleWindowPointerUp);
     
-    // Stop Animation
+    // Re-enable pointer events on the board
+    if (boardRef.current) {
+        boardRef.current.style.pointerEvents = 'auto';
+    }
+    
+    // Stop Loop
     dragRef.current.active = false;
     if (rafRef.current) cancelAnimationFrame(rafRef.current);
 
-    // Cleanup Styles Helper
+    // 2. Helper to Reset Styles
     const cleanupStyles = () => {
         dragRef.current.groupCache.forEach(item => {
             if (item.el) {
@@ -282,9 +247,9 @@ const GameBoard: React.FC<GameBoardProps> = ({ puzzle, onExit, onComplete }) => 
         });
     };
 
-    const { startX, startY, currentX, currentY, startTime, pieceId, groupCache, startPositions } = dragRef.current;
+    const { startX, startY, currentX, currentY, startTime, pieceId, groupCache, startPositions, initialPieces } = dragRef.current;
 
-    // Check for Tap (Rotation)
+    // 3. Tap Detection (Rotation)
     const dist = Math.hypot(currentX - startX, currentY - startY);
     const time = Date.now() - startTime;
 
@@ -294,37 +259,42 @@ const GameBoard: React.FC<GameBoardProps> = ({ puzzle, onExit, onComplete }) => 
          return;
     }
 
-    // Handle Drop Logic
-    const draggedPiece = pieces.find(p => p.id === pieceId);
+    // 4. Calculate Drop
+    const draggedPiece = initialPieces.find(p => p.id === pieceId);
     
     if (draggedPiece && boardRef.current) {
         const rect = boardRef.current.getBoundingClientRect();
         const settings = DIFFICULTY_SETTINGS[difficulty];
+        // Calculate grid cell size in percentage
         const pieceW = 100 / settings.cols;
         const pieceH = 100 / settings.rows;
         
-        // Calculate Grid Delta
+        // Calculate Delta in Pixels -> Grid Units
         const totalDxPixels = currentX - startX;
         const totalDyPixels = currentY - startY;
         
+        // Convert pixel delta to Grid Column/Row delta
+        // We use Math.round to snap to nearest grid unit
         const deltaCol = Math.round((totalDxPixels / rect.width) * settings.cols);
         const deltaRow = Math.round((totalDyPixels / rect.height) * settings.rows);
         
-        const groupMembers = pieces.filter(p => p.groupId === draggedPiece.groupId);
+        const groupMembers = initialPieces.filter(p => p.groupId === draggedPiece.groupId);
         let validMove = true;
         const swapRequests: { source: {x:number, y:number}, target: {x:number, y:number}, pieceId: number }[] = [];
         
-        // Validate & Plan Move
+        // Check Validity & Plan
         for (const member of groupMembers) {
             const mStart = startPositions[member.id];
             
+            // Current Logic Position in Grid
             const mStartCol = Math.round(mStart.x / pieceW);
             const mStartRow = Math.round(mStart.y / pieceH);
             
+            // Proposed New Position
             const mTargetCol = mStartCol + deltaCol;
             const mTargetRow = mStartRow + deltaRow;
             
-            // Bounds
+            // Bounds Check
             if (mTargetCol < 0 || mTargetCol >= settings.cols || mTargetRow < 0 || mTargetRow >= settings.rows) {
                 validMove = false;
                 break;
@@ -333,8 +303,8 @@ const GameBoard: React.FC<GameBoardProps> = ({ puzzle, onExit, onComplete }) => 
             const mTargetX = mTargetCol * pieceW;
             const mTargetY = mTargetRow * pieceH;
             
-            // Collision (Locked only)
-            const resident = pieces.find(p => 
+            // Collision Check (Only with Locked pieces)
+            const resident = initialPieces.find(p => 
                 p.groupId !== draggedPiece.groupId && 
                 Math.abs(p.currentX - mTargetX) < 1 &&
                 Math.abs(p.currentY - mTargetY) < 1
@@ -353,12 +323,12 @@ const GameBoard: React.FC<GameBoardProps> = ({ puzzle, onExit, onComplete }) => 
         }
         
         if (validMove) {
-            // Execute Move & Swap
-            let newPieces = [...pieces];
+            // Apply Move & Swap
+            let newPieces = [...initialPieces];
             const movedIds = new Set(groupMembers.map(m => m.id));
             
             newPieces = newPieces.map(p => {
-                // Dragged Items
+                // Moving Piece
                 const req = swapRequests.find(r => r.pieceId === p.id);
                 if (req) {
                     const isCorrect = Math.abs(req.target.x - p.correctX) < 0.1 && 
@@ -367,13 +337,14 @@ const GameBoard: React.FC<GameBoardProps> = ({ puzzle, onExit, onComplete }) => 
                     return { ...p, currentX: req.target.x, currentY: req.target.y, isLocked: isCorrect };
                 }
                 
-                // Displaced Items (Swap)
+                // Displaced Piece (Swap)
                 const displacingReq = swapRequests.find(r => 
                     Math.abs(p.currentX - r.target.x) < 1 &&
                     Math.abs(p.currentY - r.target.y) < 1
                 );
                 
                 if (displacingReq && !movedIds.has(p.id)) {
+                    // Check if victim lands in correct spot (rare but possible)
                     const isCorrect = Math.abs(displacingReq.source.x - p.correctX) < 0.1 &&
                                       Math.abs(displacingReq.source.y - p.correctY) < 0.1 &&
                                       p.rotation === 0;
@@ -382,7 +353,7 @@ const GameBoard: React.FC<GameBoardProps> = ({ puzzle, onExit, onComplete }) => 
                 return p;
             });
             
-            // Join Groups
+            // Group Merging Logic
             let merged = true;
             while(merged) {
                 merged = false;
@@ -432,9 +403,77 @@ const GameBoard: React.FC<GameBoardProps> = ({ puzzle, onExit, onComplete }) => 
         }
     }
     
-    // Always cleanup styles. React re-render will position elements correctly if move was valid.
     cleanupStyles();
   };
+
+
+  const handlePointerDown = (e: React.PointerEvent, piece: Piece) => {
+    // Only left click, unlocked pieces
+    if (e.button !== 0 || piece.isLocked || isComplete) return;
+    
+    e.stopPropagation(); // prevent background events
+    
+    // ** CRITICAL PERFORMANCE OPTIMIZATION **
+    // Disable pointer events on the board container immediately.
+    // This prevents the browser from performing hit-tests on all other puzzle pieces
+    // while we drag the current one. This is the fix for "stuttering when dragging over other tiles".
+    if (boardRef.current) {
+        boardRef.current.style.pointerEvents = 'none';
+    }
+
+    // 1. Prepare Drag Data
+    const groupMembers = pieces.filter(p => p.groupId === piece.groupId);
+    const groupCache: { id: number; el: HTMLDivElement; rotation: number }[] = [];
+    const startPositions: Record<number, {x: number, y: number}> = {};
+    
+    groupMembers.forEach(p => {
+        const el = pieceRefs.current[p.id];
+        if (el) {
+            groupCache.push({ id: p.id, el, rotation: p.rotation });
+            startPositions[p.id] = { x: p.currentX, y: p.currentY };
+            
+            // Visual feedback (Direct DOM)
+            el.style.transition = 'none';
+            el.style.zIndex = '100'; // High Z-Index to stay on top
+            el.style.boxShadow = '0 10px 20px rgba(0,0,0,0.25)'; // Lift effect
+            el.style.transform = `rotate(${p.rotation}deg) scale(1.02)`;
+            el.style.willChange = 'transform'; // Hardware accelerate
+        }
+    });
+
+    // 2. Init Drag Ref
+    dragRef.current = {
+        active: true,
+        pieceId: piece.id,
+        startX: e.clientX,
+        startY: e.clientY,
+        currentX: e.clientX,
+        currentY: e.clientY,
+        groupCache,
+        startPositions,
+        startTime: Date.now(),
+        initialPieces: pieces // Snapshot current state for use in WindowUp
+    };
+
+    // 3. Attach Window Listeners (Native events > React events for D&D)
+    window.addEventListener('pointermove', handleWindowPointerMove, { passive: false });
+    window.addEventListener('pointerup', handleWindowPointerUp);
+
+    // 4. Start Animation Loop
+    if (rafRef.current) cancelAnimationFrame(rafRef.current);
+    rafRef.current = requestAnimationFrame(updateDragVisuals);
+  };
+
+  // Check Completion
+  useEffect(() => {
+    if (pieces.length > 0 && pieces.every(p => p.isLocked)) {
+      if (!isComplete) {
+          setIsComplete(true);
+          localStorage.removeItem(`mosaic_save_${puzzle.id}`);
+          if (onComplete) onComplete();
+      }
+    }
+  }, [pieces, isComplete, onComplete, puzzle.id]);
 
   const formatTime = (seconds: number) => {
     const mins = Math.floor(seconds / 60);
@@ -459,7 +498,6 @@ const GameBoard: React.FC<GameBoardProps> = ({ puzzle, onExit, onComplete }) => 
           <div className="flex flex-col gap-1">
              <h2 className="font-serif text-xl text-slate-800 leading-tight">{puzzle.title}</h2>
              <div className="flex items-center gap-3 text-sm text-slate-500">
-               {/* Controls */}
                <div className="flex items-center gap-2 bg-slate-100/50 p-1.5 rounded-xl border border-slate-200/50">
                    <div className="relative group">
                      <select 
@@ -530,9 +568,6 @@ const GameBoard: React.FC<GameBoardProps> = ({ puzzle, onExit, onComplete }) => 
             width: 'min(95vw, 65vh)',
             aspectRatio: '1/1',
           }}
-          onPointerMove={handlePointerMove}
-          onPointerUp={handlePointerUp}
-          onPointerLeave={handlePointerUp}
         >
             {/* Grid Pattern */}
             {style === 'classic' && (
