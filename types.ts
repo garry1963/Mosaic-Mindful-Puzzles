@@ -34,6 +34,9 @@ export interface Piece {
   bgY: number;      // Percentage position for background image (for Classic)
   rotation: number; // Degrees
   
+  // Grouping
+  groupId: string;
+  
   // New properties for Mosaic style
   shape: PuzzleStyle;
   pathData?: string; // SVG Path string (in 0-100 coordinate space)

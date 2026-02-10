@@ -44,6 +44,23 @@ export const createPuzzlePieces = (difficulty: Difficulty, style: PuzzleStyle = 
   const pieceWidth = 100 / cols;
   const pieceHeight = 100 / rows;
 
+  // Generate shuffled grid positions
+  const positions: {x: number, y: number}[] = [];
+  for(let r=0; r<rows; r++) {
+      for(let c=0; c<cols; c++) {
+          positions.push({
+              x: c * pieceWidth,
+              y: r * pieceHeight
+          });
+      }
+  }
+  
+  // Fisher-Yates shuffle
+  for (let i = positions.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [positions[i], positions[j]] = [positions[j], positions[i]];
+  }
+
   if (style === 'classic') {
     // Standard Grid Logic
     for (let i = 0; i < count; i++) {
@@ -52,8 +69,11 @@ export const createPuzzlePieces = (difficulty: Difficulty, style: PuzzleStyle = 
 
       const correctX = col * pieceWidth;
       const correctY = row * pieceHeight;
-      const currentX = Math.random() * (100 - pieceWidth);
-      const currentY = Math.random() * (100 - pieceHeight);
+      
+      // Use shuffled position
+      const currentX = positions[i].x;
+      const currentY = positions[i].y;
+
       const rotation = rotate ? Math.floor(Math.random() * 4) * 90 : 0;
 
       pieces.push({
@@ -68,6 +88,7 @@ export const createPuzzlePieces = (difficulty: Difficulty, style: PuzzleStyle = 
         bgX: col * 100 / (cols - 1),
         bgY: row * 100 / (rows - 1),
         rotation,
+        groupId: `group-${i}`,
         shape: 'classic'
       });
     }
@@ -133,48 +154,6 @@ export const createPuzzlePieces = (difficulty: Difficulty, style: PuzzleStyle = 
     }
 
     // 3. Construct Pieces
-    for (let r = 0; r < rows; r++) {
-      for (let c = 0; c < cols; c++) {
-        const id = r * cols + c;
-        
-        // Define corners
-        const pTL = verts[r][c];
-        // const pTR = verts[r][c+1]; // Implied by edges
-        // const pBR = verts[r+1][c+1]; // Implied by edges
-        // const pBL = verts[r+1][c]; // Implied by edges
-
-        // Construct path: Move to TL -> Top Edge -> Right Edge -> Bottom Edge (Reversed) -> Left Edge (Reversed) -> Close
-        
-        let pathStr = `M ${pTL.x.toFixed(2)} ${pTL.y.toFixed(2)} `;
-        
-        // Top Edge
-        pathStr += hEdges[r][c] + " ";
-
-        // Right Edge
-        pathStr += vEdges[r][c+1] + " ";
-
-        // Bottom Edge (Reversed)
-        // To reverse a Bezier C x1 y1, x2 y2, x3 y3 -> C x2 y2, x1 y1, x0 y0
-        // But we stored string strings.
-        // It's easier to just draw lines back for boundaries, but for curves we need the data.
-        // Simplification: Let's regenerate the reversed curve or parse.
-        // To save code complexity, let's just generate the edge "forward" from TR to TL for bottom edge of a cell?
-        // No, shared edges must look same.
-        // Let's store edge control points instead of strings?
-        // Okay, quick fix: The edge generator above is nice, but reversing string is hard.
-        // Let's re-generate the edge string from right-to-left using same seed but swapped points?
-        // A curve P1->P2 with random offset +N is the same as P2->P1 with random offset -N.
-        // That requires keeping the noise consistent.
-        // Let's cheat: "Curved Mosaic" implies standard flow.
-        // Let's just create a closed polygon logic where we call `generateEdge` specifically for this cell,
-        // but ensure `generateEdge` is deterministic based on coordinates/index so neighbors match.
-        // Better:
-        // We actually need to draw the path in one direction for the SVG fill to work.
-        // Let's revert to storing the curve data structure.
-        
-      }
-    }
-    
     // Re-doing the loop with deterministic generation to handle the "Reverse" issue cleanly
     // We will generate the path segments on the fly using a deterministic random based on edge ID.
     const getEdgePath = (p1: {x:number, y:number}, p2: {x:number, y:number}, edgeId: string, reverse: boolean) => {
@@ -191,33 +170,16 @@ export const createPuzzlePieces = (difficulty: Difficulty, style: PuzzleStyle = 
         const dx = p2.x - p1.x;
         const dy = p2.y - p1.y;
         
-        // If it's a boundary (dx or dy is 0 AND on grid line?), make straight
-        // We know boundaries from indices in the loop below, but here we just have points.
-        // Let's pass 'isBoundary' param?
-        // Simplified: The caller handles L or C. 
-        
         const len = Math.sqrt(dx * dx + dy * dy);
         const nx = -dy / len;
         const ny = dx / len;
         
         const curveScale = 0.25;
-        // Jitter. If we reverse, we swap p1/p2. 
-        // We want the curve to bulge the SAME way relative to space.
-        // Normal vector flips when direction flips.
-        // If we want same curve, we need `variance` to flip sign if we swap.
-        // But `floatVal` is based on ID.
         
         let variance = (floatVal - 0.5) * curveScale * len;
         let variance2 = (floatVal2 - 0.5) * curveScale * len;
         
         if (reverse) {
-            // If traversing P2->P1, the normal (-dy, dx) is opposite to P1->P2.
-            // So to keep the point in same geometric spot, we don't need to negate variance if we use the calculated normal for the current direction.
-            // Wait: Normal of P1->P2 is N. Normal of P2->P1 is -N.
-            // Point = Mid + N * V.
-            // We want Point to be same.
-            // Mid is same.
-            // So if N flips, V must flip.
             variance = -variance;
             variance2 = -variance2;
         }
@@ -259,9 +221,6 @@ export const createPuzzlePieces = (difficulty: Difficulty, style: PuzzleStyle = 
         
         d += "Z";
         
-        // Calculate Bounding Box for this piece to define viewBox and container size
-        // Approximate bbox from the 4 corners is "okay" but curves might go outside.
-        // We add a padding to the corner-based bbox.
         const xs = [pTL.x, pTR.x, pBR.x, pBL.x];
         const ys = [pTL.y, pTR.y, pBR.y, pBL.y];
         const minX = Math.min(...xs) - 5; // 5% padding for curves
@@ -272,32 +231,26 @@ export const createPuzzlePieces = (difficulty: Difficulty, style: PuzzleStyle = 
         const w = maxX - minX;
         const h = maxY - minY;
         
-        // Random placement
-        const currentX = Math.random() * (100 - pieceWidth);
-        const currentY = Math.random() * (100 - pieceHeight);
+        // Use shuffled grid positions
+        const index = r * cols + c;
+        const currentX = positions[index].x;
+        const currentY = positions[index].y;
+
         const rotation = rotate ? Math.floor(Math.random() * 4) * 90 : 0;
         
         finalPieces.push({
             id: r * cols + c,
-            correctX: minX, // Logic: The SVG is placed here. The path draws relative to 0,0 of board? 
-                           // No, path data is in 0-100 board coordinates.
-                           // If we place the SVG at `minX` left, we must translate path?
-                           // Actually, let's keep path data absolute (0-100).
-                           // Then SVG viewBox should simply be "0 0 100 100"? 
-                           // If viewBox is "0 0 100 100", the piece takes up whole board space, mostly empty.
-                           // That works but might catch clicks on empty space?
-                           // Better: viewBox = `${minX} ${minY} ${w} ${h}`.
-                           // And correct position is `minX`, `minY` (in %).
-                           
+            correctX: minX,
             correctY: minY,
             width: w,
             height: h,
             currentX,
             currentY,
             isLocked: false,
-            bgX: 0, // Not used for svg
-            bgY: 0, // Not used for svg
+            bgX: 0, 
+            bgY: 0, 
             rotation,
+            groupId: `group-${r * cols + c}`,
             shape: 'mosaic',
             pathData: d,
             viewBox: `${minX} ${minY} ${w} ${h}`

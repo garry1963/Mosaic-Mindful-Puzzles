@@ -14,7 +14,6 @@ const GameBoard: React.FC<GameBoardProps> = ({ puzzle, onExit, onComplete }) => 
   const [pieces, setPieces] = useState<Piece[]>([]);
   const [difficulty, setDifficulty] = useState<Difficulty>(puzzle.difficulty || 'normal');
   const [style, setStyle] = useState<PuzzleStyle>('classic');
-  const [isChaosMode, setIsChaosMode] = useState(false);
   const [isComplete, setIsComplete] = useState(false);
   const [draggedPieceId, setDraggedPieceId] = useState<number | null>(null);
   const [showPreview, setShowPreview] = useState(false);
@@ -29,10 +28,12 @@ const GameBoard: React.FC<GameBoardProps> = ({ puzzle, onExit, onComplete }) => 
   // Ref for the board container to calculate pixels from percentages
   const boardRef = useRef<HTMLDivElement>(null);
   const dragOffset = useRef({ x: 0, y: 0 });
+  const pointerStartPos = useRef({ x: 0, y: 0 });
+  const dragStartTime = useRef(0);
   
-  // Physics state for chaos mode
-  const velocities = useRef<Record<number, {vx: number, vy: number}>>({});
-
+  // Store start positions for ALL dragged pieces (key = piece.id)
+  const dragStartPositions = useRef<Record<number, {x: number, y: number}>>({});
+  
   // Initialize Game (Load Save or Create New)
   useEffect(() => {
     // Check local storage
@@ -49,7 +50,6 @@ const GameBoard: React.FC<GameBoardProps> = ({ puzzle, onExit, onComplete }) => 
                 setPieces(savedGame.pieces);
                 setElapsedTime(savedGame.elapsedTime);
                 setHintsRemaining(savedGame.hintsRemaining);
-                setIsChaosMode(savedGame.isChaosMode);
                 setIsLoaded(true);
                 return;
             }
@@ -71,8 +71,6 @@ const GameBoard: React.FC<GameBoardProps> = ({ puzzle, onExit, onComplete }) => 
     setElapsedTime(0);
     setHintsRemaining(DIFFICULTY_SETTINGS[diff].hints);
     setHintPieceId(null);
-    setIsChaosMode(false);
-    velocities.current = {};
     setIsLoaded(true);
     
     // Clear any existing save for a "clean" start logic if explicitly called
@@ -117,7 +115,7 @@ const GameBoard: React.FC<GameBoardProps> = ({ puzzle, onExit, onComplete }) => 
         style,
         elapsedTime,
         hintsRemaining,
-        isChaosMode,
+        isChaosMode: false,
         lastPlayed: Date.now()
     };
     
@@ -135,69 +133,35 @@ const GameBoard: React.FC<GameBoardProps> = ({ puzzle, onExit, onComplete }) => 
                 style,
                 elapsedTime,
                 hintsRemaining,
-                isChaosMode,
+                isChaosMode: false,
                 lastPlayed: Date.now()
             };
             localStorage.setItem(`mosaic_save_${puzzle.id}`, JSON.stringify(saveState));
           }
       };
-  }, [pieces, difficulty, style, elapsedTime, isComplete, hintsRemaining, isChaosMode]);
+  }, [pieces, difficulty, style, elapsedTime, isComplete, hintsRemaining]);
 
 
-  // Chaos Mode Physics Loop
-  useEffect(() => {
-    if (!isChaosMode || isComplete) return;
-
-    const interval = setInterval(() => {
-      setPieces(prev => {
-        return prev.map(p => {
-          if (p.isLocked || p.id === draggedPieceId || p.id === hintPieceId) return p;
-
-          // Initialize velocity if missing
-          if (!velocities.current[p.id]) {
-            velocities.current[p.id] = { vx: 0, vy: 0 };
-          }
-          const v = velocities.current[p.id];
-
-          // Random steering (Brownian motion)
-          // Adjust velocity slightly
-          v.vx += (Math.random() - 0.5) * 0.05;
-          v.vy += (Math.random() - 0.5) * 0.05;
-
-          // Dampen / Clamp speed
-          const maxSpeed = 0.3;
-          v.vx = Math.max(-maxSpeed, Math.min(maxSpeed, v.vx));
-          v.vy = Math.max(-maxSpeed, Math.min(maxSpeed, v.vy));
-
-          // Apply position
-          let newX = p.currentX + v.vx;
-          let newY = p.currentY + v.vy;
-
-          // Soft bounds (bounce)
-          // Allow pieces to float slightly off board but bounce back
-          if (newX < -15) v.vx += 0.05; // Push right
-          if (newX > 105) v.vx -= 0.05; // Push left
-          if (newY < -15) v.vy += 0.05;
-          if (newY > 105) v.vy -= 0.05;
-
-          return { ...p, currentX: newX, currentY: newY };
-        });
-      });
-    }, 50); // 20fps for performance balance
-
-    return () => clearInterval(interval);
-  }, [isChaosMode, isComplete, draggedPieceId, hintPieceId]);
-
-  // Handle Rotation
-  const handleRotate = (e: React.MouseEvent, id: number) => {
-    e.preventDefault();
-    e.stopPropagation(); 
+  // Handle Rotation Logic (Separated for reuse)
+  const performRotation = (pieceId: number) => {
     if (!DIFFICULTY_SETTINGS[difficulty].rotate) return;
     
+    const targetPiece = pieces.find(p => p.id === pieceId);
+    if (!targetPiece || targetPiece.isLocked) return;
+    
     setPieces(prev => prev.map(p => {
-      if (p.id !== id || p.isLocked) return p;
-      return { ...p, rotation: (p.rotation + 90) % 360 };
+      // Rotate all members of the group
+      if (p.groupId === targetPiece.groupId && !p.isLocked) {
+         return { ...p, rotation: (p.rotation + 90) % 360 };
+      }
+      return p;
     }));
+  };
+
+  const handleContextRotate = (e: React.MouseEvent, id: number) => {
+    e.preventDefault();
+    e.stopPropagation(); 
+    performRotation(id);
   };
   
   // Handle Hint
@@ -226,6 +190,17 @@ const GameBoard: React.FC<GameBoardProps> = ({ puzzle, onExit, onComplete }) => 
     
     e.currentTarget.setPointerCapture(e.pointerId);
     setDraggedPieceId(piece.id);
+    
+    // Track start for tap detection
+    pointerStartPos.current = { x: e.clientX, y: e.clientY };
+    dragStartTime.current = Date.now();
+    
+    // Record start positions for ALL pieces in the group
+    const group = pieces.filter(p => p.groupId === piece.groupId);
+    dragStartPositions.current = {};
+    group.forEach(p => {
+        dragStartPositions.current[p.id] = { x: p.currentX, y: p.currentY };
+    });
 
     if (boardRef.current) {
       const rect = boardRef.current.getBoundingClientRect();
@@ -242,33 +217,235 @@ const GameBoard: React.FC<GameBoardProps> = ({ puzzle, onExit, onComplete }) => 
   const handlePointerMove = (e: React.PointerEvent) => {
     if (draggedPieceId === null || !boardRef.current) return;
     
+    const draggedPiece = pieces.find(p => p.id === draggedPieceId);
+    if (!draggedPiece) return;
+
     const rect = boardRef.current.getBoundingClientRect();
+    
+    // Calculate new position for the PRIMARY dragged piece
     const newXPx = e.clientX - rect.left - dragOffset.current.x;
     const newYPx = e.clientY - rect.top - dragOffset.current.y;
     
-    let newX = (newXPx / rect.width) * 100;
-    let newY = (newYPx / rect.height) * 100;
+    const newPrimaryX = (newXPx / rect.width) * 100;
+    const newPrimaryY = (newYPx / rect.height) * 100;
+    
+    const dx = newPrimaryX - draggedPiece.currentX;
+    const dy = newPrimaryY - draggedPiece.currentY;
 
-    setPieces(prev => prev.map(p => 
-      p.id === draggedPieceId ? { ...p, currentX: newX, currentY: newY } : p
-    ));
+    // Move ALL pieces in the group by delta
+    setPieces(prev => prev.map(p => {
+        if (p.groupId === draggedPiece.groupId) {
+            return { ...p, currentX: p.currentX + dx, currentY: p.currentY + dy };
+        }
+        return p;
+    }));
   };
 
   const handlePointerUp = (e: React.PointerEvent) => {
     if (draggedPieceId === null) return;
     
-    const piece = pieces.find(p => p.id === draggedPieceId);
-    if (piece) {
-        if (checkSnap(piece, difficulty)) {
-            setPieces(prev => prev.map(p => 
-                p.id === draggedPieceId 
-                ? { ...p, currentX: p.correctX, currentY: p.correctY, isLocked: true, rotation: 0 } 
-                : p
-            ));
-            // If the snapped piece was the hint piece, clear hint immediately
-            if (draggedPieceId === hintPieceId) {
-                setHintPieceId(null);
+    // Tap Detection
+    const dist = Math.hypot(e.clientX - pointerStartPos.current.x, e.clientY - pointerStartPos.current.y);
+    const time = Date.now() - dragStartTime.current;
+
+    // If it's a tap (short time, minimal movement), interpret as Rotation
+    if (dist < 10 && time < 300) {
+         performRotation(draggedPieceId);
+         setDraggedPieceId(null);
+         e.currentTarget.releasePointerCapture(e.pointerId);
+         return;
+    }
+
+    const draggedPiece = pieces.find(p => p.id === draggedPieceId);
+    if (draggedPiece) {
+        const settings = DIFFICULTY_SETTINGS[difficulty];
+        const pieceW = 100 / settings.cols;
+        const pieceH = 100 / settings.rows;
+        
+        // Identify all members of the dragging group
+        const groupMembers = pieces.filter(p => p.groupId === draggedPiece.groupId);
+        
+        // Calculate Grid Delta based on the primary dragged piece's movement
+        // Where did it start?
+        const startPos = dragStartPositions.current[draggedPiece.id];
+        const startCol = Math.round(startPos.x / pieceW);
+        const startRow = Math.round(startPos.y / pieceH);
+        
+        // Where is it now? (Center based)
+        const centerX = draggedPiece.currentX + pieceW / 2;
+        const centerY = draggedPiece.currentY + pieceH / 2;
+        const targetCol = Math.floor(centerX / pieceW);
+        const targetRow = Math.floor(centerY / pieceH);
+        
+        const deltaCol = targetCol - startCol;
+        const deltaRow = targetRow - startRow;
+        
+        let validMove = true;
+        const swapRequests: { source: {x:number, y:number}, target: {x:number, y:number}, pieceId: number }[] = [];
+        
+        // 1. Validate Bounds and prepare swap requests
+        for (const member of groupMembers) {
+            const mStart = dragStartPositions.current[member.id];
+            const mStartCol = Math.round(mStart.x / pieceW);
+            const mStartRow = Math.round(mStart.y / pieceH);
+            
+            const mTargetCol = mStartCol + deltaCol;
+            const mTargetRow = mStartRow + deltaRow;
+            
+            // Bounds Check
+            if (mTargetCol < 0 || mTargetCol >= settings.cols || mTargetRow < 0 || mTargetRow >= settings.rows) {
+                validMove = false;
+                break;
             }
+            
+            // Collision Check with LOCKED pieces
+            const mTargetX = mTargetCol * pieceW;
+            const mTargetY = mTargetRow * pieceH;
+            
+            // Find what is currently at the target
+            const resident = pieces.find(p => 
+                p.groupId !== draggedPiece.groupId && // Not part of my group
+                Math.abs(p.currentX - mTargetX) < 1 &&
+                Math.abs(p.currentY - mTargetY) < 1
+            );
+            
+            if (resident && resident.isLocked) {
+                validMove = false; // Cannot displace locked pieces
+                break;
+            }
+            
+            swapRequests.push({
+                pieceId: member.id,
+                source: { x: mStart.x, y: mStart.y },
+                target: { x: mTargetX, y: mTargetY }
+            });
+        }
+        
+        if (validMove) {
+            // 2. Perform Move & Swap
+            let newPieces = [...pieces];
+            
+            // Identify victims (pieces at target locations)
+            const victims: Piece[] = [];
+            const movedIds = new Set(groupMembers.map(m => m.id));
+            
+            swapRequests.forEach(req => {
+                const victim = newPieces.find(p => 
+                    !movedIds.has(p.id) &&
+                    Math.abs(p.currentX - req.target.x) < 1 &&
+                    Math.abs(p.currentY - req.target.y) < 1
+                );
+                if (victim) victims.push(victim);
+            });
+            
+            // Execute updates
+            newPieces = newPieces.map(p => {
+                // If it's a group member, move to target
+                const req = swapRequests.find(r => r.pieceId === p.id);
+                if (req) {
+                    // Check for lock
+                    // A group member locks if it hits its correct spot AND has correct rotation
+                    const isCorrect = Math.abs(req.target.x - p.correctX) < 0.1 && 
+                                      Math.abs(req.target.y - p.correctY) < 0.1 && 
+                                      p.rotation === 0;
+                    return { ...p, currentX: req.target.x, currentY: req.target.y, isLocked: isCorrect };
+                }
+                
+                // If it's a victim, move to source of the piece that displaced it
+                const displacingReq = swapRequests.find(r => 
+                    Math.abs(p.currentX - r.target.x) < 1 &&
+                    Math.abs(p.currentY - r.target.y) < 1
+                );
+                
+                if (displacingReq && !movedIds.has(p.id)) {
+                    // Victim check for lock (unlikely if moving to empty, but good practice)
+                    const isCorrect = Math.abs(displacingReq.source.x - p.correctX) < 0.1 &&
+                                      Math.abs(displacingReq.source.y - p.correctY) < 0.1 &&
+                                      p.rotation === 0;
+                    return { ...p, currentX: displacingReq.source.x, currentY: displacingReq.source.y, isLocked: isCorrect };
+                }
+                
+                return p;
+            });
+
+            // 3. JOIN Logic (Merge Groups)
+            // Check adjacency for all moved group members
+            let merged = true;
+            while(merged) {
+                merged = false;
+                // We map over newPieces to find potential merges
+                // We need to look for any piece in the just-moved group
+                // that is adjacent to a compatible neighbor
+                
+                // Refresh group member list from newPieces state
+                const currentGroupMembers = newPieces.filter(p => p.groupId === draggedPiece.groupId);
+                
+                for (const member of currentGroupMembers) {
+                    // currentX is left offset (Col), currentY is top offset (Row)
+                    const col = Math.round(member.currentX / pieceW);
+                    const row = Math.round(member.currentY / pieceH);
+
+                    // Check neighbors (Right, Down, Left, Up)
+                    const neighbors = [
+                        { dc: 1, dr: 0, mySide: 'right' },
+                        { dc: 0, dr: 1, mySide: 'bottom' },
+                        { dc: -1, dr: 0, mySide: 'left' },
+                        { dc: 0, dr: -1, mySide: 'top' }
+                    ];
+
+                    for (const n of neighbors) {
+                        const nX = (col + n.dc) * pieceW;
+                        const nY = (row + n.dr) * pieceH;
+                        
+                        // Find piece at neighbor loc
+                        const neighborPiece = newPieces.find(p => 
+                            p.groupId !== member.groupId && // Not already in group
+                            Math.abs(p.currentX - nX) < 1 &&
+                            Math.abs(p.currentY - nY) < 1
+                        );
+
+                        if (neighborPiece) {
+                            // Check compatibility
+                            // Are they SUPPOSED to be neighbors?
+                            // Compare correct coordinates
+                            const correctDX = neighborPiece.correctX - member.correctX;
+                            const correctDY = neighborPiece.correctY - member.correctY;
+                            
+                            const expectedDX = n.dc * pieceW;
+                            const expectedDY = n.dr * pieceH;
+
+                            // Also check rotations match (must have same rotation to join)
+                            if (Math.abs(correctDX - expectedDX) < 1 && 
+                                Math.abs(correctDY - expectedDY) < 1 &&
+                                member.rotation === neighborPiece.rotation) 
+                            {
+                                // MERGE
+                                const targetGroupId = member.groupId;
+                                const sourceGroupId = neighborPiece.groupId;
+                                
+                                newPieces = newPieces.map(p => 
+                                    p.groupId === sourceGroupId ? { ...p, groupId: targetGroupId } : p
+                                );
+                                merged = true;
+                                break; 
+                            }
+                        }
+                    }
+                    if (merged) break;
+                }
+            }
+
+            setPieces(newPieces);
+
+        } else {
+            // Revert to start
+            setPieces(prev => prev.map(p => {
+                if (p.groupId === draggedPiece.groupId) {
+                    const start = dragStartPositions.current[p.id];
+                    return { ...p, currentX: start.x, currentY: start.y };
+                }
+                return p;
+            }));
         }
     }
     
@@ -297,120 +474,91 @@ const GameBoard: React.FC<GameBoardProps> = ({ puzzle, onExit, onComplete }) => 
   const activeHintPiece = pieces.find(p => p.id === hintPieceId);
 
   return (
-    <div className="h-screen w-full flex flex-col bg-slate-100 overflow-hidden relative">
+    <div className="h-screen w-full flex flex-col bg-slate-100 overflow-hidden relative select-none">
       {/* Background */}
       <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top_right,_var(--tw-gradient-stops))] from-slate-200 via-slate-100 to-slate-200 -z-10"></div>
     
-      {/* Top Bar - Glassmorphism */}
-      <div className="h-20 absolute top-0 left-0 right-0 z-20 px-6 flex items-center justify-between glass-panel shadow-sm">
-        <div className="flex items-center gap-6">
-          <button onClick={onExit} className="p-2.5 hover:bg-white/50 rounded-full transition-colors text-slate-600 border border-transparent hover:border-slate-200" title="Save & Exit">
-            <X size={24} />
+      {/* Top Bar - Optimized for Tablet Touch */}
+      <div className="h-24 absolute top-0 left-0 right-0 z-20 px-4 md:px-8 flex items-center justify-between glass-panel shadow-sm">
+        <div className="flex items-center gap-4 md:gap-8">
+          <button onClick={onExit} className="p-4 hover:bg-white/50 rounded-full transition-colors text-slate-600 border border-transparent hover:border-slate-200 active:scale-95" title="Save & Exit">
+            <X size={28} />
           </button>
           
-          <div className="flex flex-col">
-             <h2 className="font-serif text-lg text-slate-800 leading-tight">{puzzle.title}</h2>
-             <div className="flex items-center gap-3 text-xs text-slate-500 mt-1">
+          <div className="flex flex-col gap-1">
+             <h2 className="font-serif text-xl text-slate-800 leading-tight">{puzzle.title}</h2>
+             <div className="flex items-center gap-3 text-sm text-slate-500">
                {/* Controls */}
-               <div className="flex items-center gap-2 bg-slate-100/50 p-1 rounded-lg border border-slate-200/50">
+               <div className="flex items-center gap-2 bg-slate-100/50 p-1.5 rounded-xl border border-slate-200/50">
                     {/* Difficulty Selector */}
                    <div className="relative group">
                      <select 
                        value={difficulty}
                        onChange={(e) => handleSettingChange(e.target.value as Difficulty, style)}
-                       className="appearance-none bg-transparent pl-2 pr-5 py-0.5 cursor-pointer text-slate-700 font-medium focus:outline-none capitalize"
+                       className="appearance-none bg-transparent pl-3 pr-8 py-1 cursor-pointer text-slate-700 font-medium focus:outline-none capitalize text-base"
                      >
                        {(Object.keys(DIFFICULTY_SETTINGS) as Difficulty[]).map((d) => (
                          <option key={d} value={d}>{d}</option>
                        ))}
                      </select>
-                     <ChevronDown size={10} className="absolute right-1 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
-                   </div>
-                   
-                   <div className="w-px h-3 bg-slate-300"></div>
-
-                   {/* Style Selector */}
-                   <div className="relative group">
-                     <select 
-                       value={style}
-                       onChange={(e) => handleSettingChange(difficulty, e.target.value as PuzzleStyle)}
-                       className="appearance-none bg-transparent pl-2 pr-5 py-0.5 cursor-pointer text-slate-700 font-medium focus:outline-none capitalize"
-                     >
-                        <option value="classic">Grid</option>
-                        <option value="mosaic">Mosaic</option>
-                     </select>
-                     <Shapes size={10} className="absolute right-1 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+                     <ChevronDown size={14} className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
                    </div>
                </div>
                
                {/* Restart Button */}
                <button 
                   onClick={handleRestart}
-                  className="p-1 hover:bg-slate-200 rounded text-slate-500 hover:text-red-500 transition-colors"
+                  className="p-2 hover:bg-slate-200 rounded-lg text-slate-500 hover:text-red-500 transition-colors active:bg-slate-300"
                   title="Restart Puzzle"
                >
-                  <RotateCcw size={14} />
-               </button>
-
-               {/* Chaos Mode Toggle */}
-               <button
-                  onClick={() => setIsChaosMode(!isChaosMode)}
-                  className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md border transition-all ${
-                    isChaosMode 
-                    ? 'bg-amber-100 border-amber-200 text-amber-700 shadow-sm' 
-                    : 'bg-white/50 border-slate-200 text-slate-500 hover:border-slate-300'
-                    }`}
-                  title="Chaos Mode: Pieces drift over time"
-               >
-                 <Zap size={10} className={isChaosMode ? 'fill-amber-700' : ''} />
-                 <span className="font-medium">Chaos</span>
+                  <RotateCcw size={20} />
                </button>
              </div>
           </div>
         </div>
         
-        <div className="flex items-center gap-4">
-           <div className="flex items-center gap-2 font-mono text-slate-600 bg-white/50 px-4 py-1.5 rounded-full border border-slate-200/50 shadow-sm">
-             <Clock size={14} className="text-slate-400" />
+        <div className="flex items-center gap-3 md:gap-6">
+           <div className="hidden md:flex items-center gap-2 font-mono text-slate-600 bg-white/50 px-5 py-2 rounded-full border border-slate-200/50 shadow-sm text-base">
+             <Clock size={18} className="text-slate-400" />
              {formatTime(elapsedTime)}
            </div>
            
-           <div className="flex gap-2">
+           <div className="flex gap-3">
              <button
                 onClick={handleHint}
                 disabled={hintsRemaining === 0 || isComplete || hintPieceId !== null}
-                className={`flex items-center gap-2 px-4 py-2 rounded-full transition-all font-medium text-sm shadow-sm border ${
+                className={`flex items-center gap-2 px-5 py-3 rounded-full transition-all font-bold text-base shadow-sm border active:scale-95 ${
                     hintsRemaining > 0 && !isComplete 
                     ? 'text-amber-700 bg-amber-50 border-amber-100 hover:bg-amber-100 hover:shadow' 
                     : 'text-slate-400 bg-slate-50 border-slate-100 cursor-not-allowed'
                 }`}
              >
-                <Lightbulb size={16} className={hintPieceId !== null ? 'animate-pulse fill-amber-700' : ''} />
+                <Lightbulb size={20} className={hintPieceId !== null ? 'animate-pulse fill-amber-700' : ''} />
                 <span>{hintsRemaining}</span>
              </button>
 
              <button 
-                className="p-2.5 text-indigo-600 bg-indigo-50 hover:bg-indigo-100 border border-indigo-100 rounded-full transition-colors shadow-sm"
+                className="p-3.5 text-indigo-600 bg-indigo-50 hover:bg-indigo-100 border border-indigo-100 rounded-full transition-colors shadow-sm active:scale-95 active:bg-indigo-200"
                 onPointerDown={() => setShowPreview(true)}
                 onPointerUp={() => setShowPreview(false)}
                 onPointerLeave={() => setShowPreview(false)}
                 title="Hold to Preview"
              >
-                <Eye size={20} />
+                <Eye size={24} />
              </button>
            </div>
         </div>
       </div>
 
       {/* Main Game Area */}
-      <div className="flex-1 relative overflow-hidden flex items-center justify-center p-8 pt-24">
+      <div className="flex-1 relative overflow-hidden flex items-center justify-center p-4 md:p-8 pt-28">
         
         {/* The Board Container */}
         <div 
           ref={boardRef}
           className="relative shadow-2xl shadow-indigo-500/10 bg-white/40 backdrop-blur-sm rounded-xl border border-white/40"
           style={{
-            width: 'min(90vw, 75vh)',
+            width: 'min(95vw, 65vh)', // Adjusted for tablet spacing
             aspectRatio: '1/1',
           }}
           onPointerMove={handlePointerMove}
@@ -477,12 +625,12 @@ const GameBoard: React.FC<GameBoardProps> = ({ puzzle, onExit, onComplete }) => 
             {/* Pieces */}
             {pieces.map((piece) => {
                 const isHintTarget = piece.id === hintPieceId;
+                const isDragging = draggedPieceId !== null && pieces.find(p => p.id === draggedPieceId)?.groupId === piece.groupId;
                 return (
                 <div
                     key={piece.id}
                     onPointerDown={(e) => handlePointerDown(e, piece)}
-                    onContextMenu={(e) => handleRotate(e, piece.id)}
-                    onDoubleClick={(e) => handleRotate(e, piece.id)}
+                    onContextMenu={(e) => handleContextRotate(e, piece.id)}
                     className={`absolute cursor-grab active:cursor-grabbing transition-shadow ${
                         piece.isLocked ? 'z-0 transition-all duration-500 ease-out' : 'z-10 drop-shadow-xl'
                     } ${isHintTarget ? 'z-50' : ''}`}
@@ -492,10 +640,10 @@ const GameBoard: React.FC<GameBoardProps> = ({ puzzle, onExit, onComplete }) => 
                         left: `${piece.currentX}%`,
                         top: `${piece.currentY}%`,
                         transform: `rotate(${piece.rotation}deg) ${isHintTarget ? 'scale(1.1)' : ''}`,
-                        zIndex: draggedPieceId === piece.id ? 50 : (piece.isLocked ? 1 : (isHintTarget ? 40 : 10)),
+                        zIndex: isDragging ? 50 : (piece.isLocked ? 1 : (isHintTarget ? 40 : 10)),
                         opacity: showPreview ? 0 : 1,
                         touchAction: 'none',
-                        transition: draggedPieceId === piece.id ? 'none' : 'transform 0.2s, left 0.2s, top 0.2s'
+                        transition: isDragging ? 'none' : 'transform 0.2s, left 0.2s, top 0.2s'
                     }}
                 >
                     {/* Visual highlighter for hint */}
@@ -576,29 +724,29 @@ const GameBoard: React.FC<GameBoardProps> = ({ puzzle, onExit, onComplete }) => 
 
       {/* Completion Modal */}
       {isComplete && (
-        <div className="absolute inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-md animate-in fade-in duration-700">
-           <div className="bg-white p-10 rounded-[2rem] shadow-2xl max-w-md w-full text-center transform animate-in zoom-in-95 duration-500 border border-white/20">
+        <div className="absolute inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-md animate-in fade-in duration-700 p-4">
+           <div className="bg-white p-8 md:p-12 rounded-[2.5rem] shadow-2xl max-w-lg w-full text-center transform animate-in zoom-in-95 duration-500 border border-white/20">
               <div className="relative inline-block mb-6">
                  <div className="absolute inset-0 bg-green-100 rounded-full blur-xl opacity-70"></div>
-                 <div className="h-24 w-24 bg-gradient-to-tr from-emerald-50 to-emerald-100 text-emerald-600 rounded-full flex items-center justify-center relative shadow-sm">
-                    <Award size={48} />
+                 <div className="h-28 w-28 bg-gradient-to-tr from-emerald-50 to-emerald-100 text-emerald-600 rounded-full flex items-center justify-center relative shadow-sm mx-auto">
+                    <Award size={56} />
                  </div>
               </div>
               
-              <h2 className="text-4xl font-serif font-medium text-slate-800 mb-3">Beautiful!</h2>
-              <p className="text-slate-500 mb-8 text-lg">You completed {puzzle.title} in <span className="font-mono font-medium text-slate-700">{formatTime(elapsedTime)}</span>.</p>
+              <h2 className="text-4xl md:text-5xl font-serif font-medium text-slate-800 mb-4">Beautiful!</h2>
+              <p className="text-slate-500 mb-10 text-xl">You completed {puzzle.title} in <span className="font-mono font-medium text-slate-700">{formatTime(elapsedTime)}</span>.</p>
               
-              <div className="flex gap-4 justify-center">
-                 <button onClick={onExit} className="px-8 py-3.5 rounded-2xl bg-slate-50 text-slate-600 font-medium hover:bg-slate-100 transition-colors border border-slate-200">
+              <div className="flex flex-col md:flex-row gap-4 justify-center">
+                 <button onClick={onExit} className="px-8 py-4 rounded-2xl bg-slate-50 text-slate-600 font-bold text-lg hover:bg-slate-100 transition-colors border border-slate-200 active:scale-95">
                     Gallery
                  </button>
                  <button 
                     onClick={() => {
                         initializeNewGame(difficulty, style);
                     }}
-                    className="px-8 py-3.5 rounded-2xl bg-indigo-600 text-white font-medium hover:bg-indigo-700 transition-all shadow-lg hover:shadow-indigo-500/30 flex items-center gap-2"
+                    className="px-8 py-4 rounded-2xl bg-indigo-600 text-white font-bold text-lg hover:bg-indigo-700 transition-all shadow-lg hover:shadow-indigo-500/30 flex items-center justify-center gap-3 active:scale-95"
                  >
-                    <RotateCw size={18} /> Play Again
+                    <RotateCw size={20} /> Play Again
                  </button>
               </div>
            </div>
