@@ -15,7 +15,6 @@ const GameBoard: React.FC<GameBoardProps> = ({ puzzle, onExit, onComplete }) => 
   const [difficulty, setDifficulty] = useState<Difficulty>(puzzle.difficulty || 'normal');
   const [style, setStyle] = useState<PuzzleStyle>('classic');
   const [isComplete, setIsComplete] = useState(false);
-  const [draggedPieceId, setDraggedPieceId] = useState<number | null>(null);
   const [showPreview, setShowPreview] = useState(false);
   const [elapsedTime, setElapsedTime] = useState(0);
   const [isLoaded, setIsLoaded] = useState(false);
@@ -25,15 +24,16 @@ const GameBoard: React.FC<GameBoardProps> = ({ puzzle, onExit, onComplete }) => 
   const [hintsRemaining, setHintsRemaining] = useState(0);
   const [hintPieceId, setHintPieceId] = useState<number | null>(null);
   
-  // Ref for the board container to calculate pixels from percentages
+  // Refs for High-Performance Dragging
   const boardRef = useRef<HTMLDivElement>(null);
-  const dragOffset = useRef({ x: 0, y: 0 });
-  const pointerStartPos = useRef({ x: 0, y: 0 });
+  const pieceRefs = useRef<Record<number, HTMLDivElement | null>>({});
+  
+  const draggedPieceIdRef = useRef<number | null>(null);
+  const activeDragGroupRef = useRef<number[]>([]);
+  const pointerStartCoords = useRef({ x: 0, y: 0 });
   const dragStartTime = useRef(0);
-  
-  // Store start positions for ALL dragged pieces (key = piece.id)
   const dragStartPositions = useRef<Record<number, {x: number, y: number}>>({});
-  
+
   // Initialize Game (Load Save or Create New)
   useEffect(() => {
     // Check local storage
@@ -183,109 +183,113 @@ const GameBoard: React.FC<GameBoardProps> = ({ puzzle, onExit, onComplete }) => 
     }, 3000);
   };
 
-  // Dragging Logic
+  // --- High Performance Drag & Drop Logic ---
+
   const handlePointerDown = (e: React.PointerEvent, piece: Piece) => {
-    if (e.button !== 0) return;
-    if (piece.isLocked || isComplete) return;
+    if (e.button !== 0 || piece.isLocked || isComplete) return;
     
     e.currentTarget.setPointerCapture(e.pointerId);
-    setDraggedPieceId(piece.id);
     
-    // Track start for tap detection
-    pointerStartPos.current = { x: e.clientX, y: e.clientY };
+    // Initialize Logic Refs
+    draggedPieceIdRef.current = piece.id;
+    pointerStartCoords.current = { x: e.clientX, y: e.clientY };
     dragStartTime.current = Date.now();
     
-    // Record start positions for ALL pieces in the group
+    // Identify group and store start positions
     const group = pieces.filter(p => p.groupId === piece.groupId);
+    activeDragGroupRef.current = group.map(p => p.id);
     dragStartPositions.current = {};
+    
     group.forEach(p => {
         dragStartPositions.current[p.id] = { x: p.currentX, y: p.currentY };
+        
+        // Immediate Visual Feedback via Direct DOM manipulation
+        // This avoids waiting for a React render cycle
+        const el = pieceRefs.current[p.id];
+        if (el) {
+            el.style.transition = 'none';
+            el.style.zIndex = '100'; // Bring to top
+            el.style.cursor = 'grabbing';
+            el.style.filter = 'drop-shadow(0 15px 30px rgba(0,0,0,0.25))'; // Lift effect
+            el.style.transform = `rotate(${p.rotation}deg) scale(1.05)`; // Subtle pop
+        }
     });
-
-    if (boardRef.current) {
-      const rect = boardRef.current.getBoundingClientRect();
-      const pieceXPx = (piece.currentX / 100) * rect.width;
-      const pieceYPx = (piece.currentY / 100) * rect.height;
-      
-      dragOffset.current = {
-        x: e.clientX - rect.left - pieceXPx,
-        y: e.clientY - rect.top - pieceYPx
-      };
-    }
   };
 
   const handlePointerMove = (e: React.PointerEvent) => {
-    if (draggedPieceId === null || !boardRef.current) return;
+    if (draggedPieceIdRef.current === null || !boardRef.current) return;
     
-    const draggedPiece = pieces.find(p => p.id === draggedPieceId);
-    if (!draggedPiece) return;
-
-    const rect = boardRef.current.getBoundingClientRect();
+    // Direct DOM manipulation for 60fps performance
+    // Calculate delta in pixels
+    const dx = e.clientX - pointerStartCoords.current.x;
+    const dy = e.clientY - pointerStartCoords.current.y;
     
-    // Calculate new position for the PRIMARY dragged piece
-    const newXPx = e.clientX - rect.left - dragOffset.current.x;
-    const newYPx = e.clientY - rect.top - dragOffset.current.y;
-    
-    const newPrimaryX = (newXPx / rect.width) * 100;
-    const newPrimaryY = (newYPx / rect.height) * 100;
-    
-    const dx = newPrimaryX - draggedPiece.currentX;
-    const dy = newPrimaryY - draggedPiece.currentY;
-
-    // Move ALL pieces in the group by delta
-    setPieces(prev => prev.map(p => {
-        if (p.groupId === draggedPiece.groupId) {
-            return { ...p, currentX: p.currentX + dx, currentY: p.currentY + dy };
+    activeDragGroupRef.current.forEach(id => {
+        const el = pieceRefs.current[id];
+        const p = pieces.find(x => x.id === id); // Access state (stable during drag)
+        if (el && p) {
+            // Translate allows us to move without recalculating % layouts
+            // We combine it with existing rotation and the scale effect
+            el.style.transform = `translate(${dx}px, ${dy}px) rotate(${p.rotation}deg) scale(1.05)`;
         }
-        return p;
-    }));
+    });
   };
 
   const handlePointerUp = (e: React.PointerEvent) => {
-    if (draggedPieceId === null) return;
+    const draggedId = draggedPieceIdRef.current;
+    if (draggedId === null) return;
     
-    // Tap Detection
-    const dist = Math.hypot(e.clientX - pointerStartPos.current.x, e.clientY - pointerStartPos.current.y);
+    e.currentTarget.releasePointerCapture(e.pointerId);
+
+    // Helper to clear manual DOM overrides so React can take back control
+    const cleanupStyles = () => {
+        activeDragGroupRef.current.forEach(id => {
+            const el = pieceRefs.current[id];
+            if (el) {
+                el.style.transform = '';
+                el.style.zIndex = '';
+                el.style.cursor = '';
+                el.style.filter = '';
+                el.style.transition = '';
+            }
+        });
+    };
+
+    // Tap Detection (Quick tap = Rotate)
+    const dist = Math.hypot(e.clientX - pointerStartCoords.current.x, e.clientY - pointerStartCoords.current.y);
     const time = Date.now() - dragStartTime.current;
 
-    // If it's a tap (short time, minimal movement), interpret as Rotation
     if (dist < 10 && time < 300) {
-         performRotation(draggedPieceId);
-         setDraggedPieceId(null);
-         e.currentTarget.releasePointerCapture(e.pointerId);
+         cleanupStyles(); // Clear drag styles
+         performRotation(draggedId); // Trigger rotation state update
+         draggedPieceIdRef.current = null;
          return;
     }
 
-    const draggedPiece = pieces.find(p => p.id === draggedPieceId);
-    if (draggedPiece) {
+    const draggedPiece = pieces.find(p => p.id === draggedId);
+    if (draggedPiece && boardRef.current) {
+        const rect = boardRef.current.getBoundingClientRect();
         const settings = DIFFICULTY_SETTINGS[difficulty];
         const pieceW = 100 / settings.cols;
         const pieceH = 100 / settings.rows;
         
-        // Identify all members of the dragging group
+        // Calculate total movement in percentage
+        const totalDxPixels = e.clientX - pointerStartCoords.current.x;
+        const totalDyPixels = e.clientY - pointerStartCoords.current.y;
+        
+        const deltaCol = Math.round((totalDxPixels / rect.width) * settings.cols);
+        const deltaRow = Math.round((totalDyPixels / rect.height) * settings.rows);
+        
+        // Apply Grid Logic
         const groupMembers = pieces.filter(p => p.groupId === draggedPiece.groupId);
-        
-        // Calculate Grid Delta based on the primary dragged piece's movement
-        // Where did it start?
-        const startPos = dragStartPositions.current[draggedPiece.id];
-        const startCol = Math.round(startPos.x / pieceW);
-        const startRow = Math.round(startPos.y / pieceH);
-        
-        // Where is it now? (Center based)
-        const centerX = draggedPiece.currentX + pieceW / 2;
-        const centerY = draggedPiece.currentY + pieceH / 2;
-        const targetCol = Math.floor(centerX / pieceW);
-        const targetRow = Math.floor(centerY / pieceH);
-        
-        const deltaCol = targetCol - startCol;
-        const deltaRow = targetRow - startRow;
-        
         let validMove = true;
         const swapRequests: { source: {x:number, y:number}, target: {x:number, y:number}, pieceId: number }[] = [];
         
-        // 1. Validate Bounds and prepare swap requests
+        // 1. Validate Bounds
         for (const member of groupMembers) {
-            const mStart = dragStartPositions.current[member.id];
+            const mStart = dragStartPositions.current[member.id]; // Start %
+            
+            // Calculate hypothetical target in grid units
             const mStartCol = Math.round(mStart.x / pieceW);
             const mStartRow = Math.round(mStart.y / pieceH);
             
@@ -298,19 +302,18 @@ const GameBoard: React.FC<GameBoardProps> = ({ puzzle, onExit, onComplete }) => 
                 break;
             }
             
-            // Collision Check with LOCKED pieces
             const mTargetX = mTargetCol * pieceW;
             const mTargetY = mTargetRow * pieceH;
             
-            // Find what is currently at the target
+            // Check Locked Collision
             const resident = pieces.find(p => 
-                p.groupId !== draggedPiece.groupId && // Not part of my group
+                p.groupId !== draggedPiece.groupId && 
                 Math.abs(p.currentX - mTargetX) < 1 &&
                 Math.abs(p.currentY - mTargetY) < 1
             );
             
             if (resident && resident.isLocked) {
-                validMove = false; // Cannot displace locked pieces
+                validMove = false;
                 break;
             }
             
@@ -322,10 +325,8 @@ const GameBoard: React.FC<GameBoardProps> = ({ puzzle, onExit, onComplete }) => 
         }
         
         if (validMove) {
-            // 2. Perform Move & Swap
+            // 2. Perform Swap & Move in React State
             let newPieces = [...pieces];
-            
-            // Identify victims (pieces at target locations)
             const victims: Piece[] = [];
             const movedIds = new Set(groupMembers.map(m => m.id));
             
@@ -338,91 +339,65 @@ const GameBoard: React.FC<GameBoardProps> = ({ puzzle, onExit, onComplete }) => 
                 if (victim) victims.push(victim);
             });
             
-            // Execute updates
             newPieces = newPieces.map(p => {
-                // If it's a group member, move to target
+                // Dragged Piece -> Target
                 const req = swapRequests.find(r => r.pieceId === p.id);
                 if (req) {
-                    // Check for lock
-                    // A group member locks if it hits its correct spot AND has correct rotation
                     const isCorrect = Math.abs(req.target.x - p.correctX) < 0.1 && 
                                       Math.abs(req.target.y - p.correctY) < 0.1 && 
                                       p.rotation === 0;
                     return { ...p, currentX: req.target.x, currentY: req.target.y, isLocked: isCorrect };
                 }
                 
-                // If it's a victim, move to source of the piece that displaced it
+                // Victim Piece -> Source
                 const displacingReq = swapRequests.find(r => 
                     Math.abs(p.currentX - r.target.x) < 1 &&
                     Math.abs(p.currentY - r.target.y) < 1
                 );
                 
                 if (displacingReq && !movedIds.has(p.id)) {
-                    // Victim check for lock (unlikely if moving to empty, but good practice)
                     const isCorrect = Math.abs(displacingReq.source.x - p.correctX) < 0.1 &&
                                       Math.abs(displacingReq.source.y - p.correctY) < 0.1 &&
                                       p.rotation === 0;
                     return { ...p, currentX: displacingReq.source.x, currentY: displacingReq.source.y, isLocked: isCorrect };
                 }
-                
                 return p;
             });
-
-            // 3. JOIN Logic (Merge Groups)
-            // Check adjacency for all moved group members
+            
+            // 3. Join Logic (Merge Groups)
             let merged = true;
             while(merged) {
                 merged = false;
-                // We map over newPieces to find potential merges
-                // We need to look for any piece in the just-moved group
-                // that is adjacent to a compatible neighbor
-                
-                // Refresh group member list from newPieces state
                 const currentGroupMembers = newPieces.filter(p => p.groupId === draggedPiece.groupId);
-                
                 for (const member of currentGroupMembers) {
-                    // currentX is left offset (Col), currentY is top offset (Row)
                     const col = Math.round(member.currentX / pieceW);
                     const row = Math.round(member.currentY / pieceH);
-
-                    // Check neighbors (Right, Down, Left, Up)
                     const neighbors = [
-                        { dc: 1, dr: 0, mySide: 'right' },
-                        { dc: 0, dr: 1, mySide: 'bottom' },
-                        { dc: -1, dr: 0, mySide: 'left' },
-                        { dc: 0, dr: -1, mySide: 'top' }
+                        { dc: 1, dr: 0 }, { dc: 0, dr: 1 }, { dc: -1, dr: 0 }, { dc: 0, dr: -1 }
                     ];
 
                     for (const n of neighbors) {
                         const nX = (col + n.dc) * pieceW;
                         const nY = (row + n.dr) * pieceH;
                         
-                        // Find piece at neighbor loc
                         const neighborPiece = newPieces.find(p => 
-                            p.groupId !== member.groupId && // Not already in group
+                            p.groupId !== member.groupId &&
                             Math.abs(p.currentX - nX) < 1 &&
                             Math.abs(p.currentY - nY) < 1
                         );
 
                         if (neighborPiece) {
-                            // Check compatibility
-                            // Are they SUPPOSED to be neighbors?
-                            // Compare correct coordinates
                             const correctDX = neighborPiece.correctX - member.correctX;
                             const correctDY = neighborPiece.correctY - member.correctY;
-                            
                             const expectedDX = n.dc * pieceW;
                             const expectedDY = n.dr * pieceH;
 
-                            // Also check rotations match (must have same rotation to join)
                             if (Math.abs(correctDX - expectedDX) < 1 && 
                                 Math.abs(correctDY - expectedDY) < 1 &&
                                 member.rotation === neighborPiece.rotation) 
                             {
-                                // MERGE
                                 const targetGroupId = member.groupId;
                                 const sourceGroupId = neighborPiece.groupId;
-                                
                                 newPieces = newPieces.map(p => 
                                     p.groupId === sourceGroupId ? { ...p, groupId: targetGroupId } : p
                                 );
@@ -436,21 +411,14 @@ const GameBoard: React.FC<GameBoardProps> = ({ puzzle, onExit, onComplete }) => 
             }
 
             setPieces(newPieces);
-
-        } else {
-            // Revert to start
-            setPieces(prev => prev.map(p => {
-                if (p.groupId === draggedPiece.groupId) {
-                    const start = dragStartPositions.current[p.id];
-                    return { ...p, currentX: start.x, currentY: start.y };
-                }
-                return p;
-            }));
         }
     }
     
-    setDraggedPieceId(null);
-    e.currentTarget.releasePointerCapture(e.pointerId);
+    // Always cleanup DOM styles
+    // If we updated state, React re-render will position elements correctly based on new props
+    // If we didn't (invalid move), clearing styles snaps elements back to original React props
+    cleanupStyles();
+    draggedPieceIdRef.current = null;
   };
 
   // Check Completion
@@ -563,6 +531,7 @@ const GameBoard: React.FC<GameBoardProps> = ({ puzzle, onExit, onComplete }) => 
           }}
           onPointerMove={handlePointerMove}
           onPointerUp={handlePointerUp}
+          onPointerLeave={handlePointerUp}
         >
             {/* Grid Pattern (Guide) - Only show for Classic/Grid style */}
             {style === 'classic' && (
@@ -625,13 +594,13 @@ const GameBoard: React.FC<GameBoardProps> = ({ puzzle, onExit, onComplete }) => 
             {/* Pieces */}
             {pieces.map((piece) => {
                 const isHintTarget = piece.id === hintPieceId;
-                const isDragging = draggedPieceId !== null && pieces.find(p => p.id === draggedPieceId)?.groupId === piece.groupId;
                 return (
                 <div
                     key={piece.id}
+                    ref={(el) => { pieceRefs.current[piece.id] = el; }}
                     onPointerDown={(e) => handlePointerDown(e, piece)}
                     onContextMenu={(e) => handleContextRotate(e, piece.id)}
-                    className={`absolute cursor-grab active:cursor-grabbing transition-shadow ${
+                    className={`absolute cursor-grab active:cursor-grabbing ${
                         piece.isLocked ? 'z-0 transition-all duration-500 ease-out' : 'z-10 drop-shadow-xl'
                     } ${isHintTarget ? 'z-50' : ''}`}
                     style={{
@@ -640,10 +609,11 @@ const GameBoard: React.FC<GameBoardProps> = ({ puzzle, onExit, onComplete }) => 
                         left: `${piece.currentX}%`,
                         top: `${piece.currentY}%`,
                         transform: `rotate(${piece.rotation}deg) ${isHintTarget ? 'scale(1.1)' : ''}`,
-                        zIndex: isDragging ? 50 : (piece.isLocked ? 1 : (isHintTarget ? 40 : 10)),
+                        zIndex: piece.isLocked ? 1 : (isHintTarget ? 40 : 10),
                         opacity: showPreview ? 0 : 1,
                         touchAction: 'none',
-                        transition: isDragging ? 'none' : 'transform 0.2s, left 0.2s, top 0.2s'
+                        // Note: Transition is handled via style attribute in React or manually disabled during drag
+                        transition: 'transform 0.2s, left 0.2s, top 0.2s' 
                     }}
                 >
                     {/* Visual highlighter for hint */}
