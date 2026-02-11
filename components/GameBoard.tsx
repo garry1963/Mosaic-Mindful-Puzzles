@@ -62,9 +62,10 @@ const PuzzlePieceLayer = memo(({
                 <div
                     key={piece.id}
                     ref={(el) => { pieceRefs.current[piece.id] = el; }}
+                    draggable={false}
                     onPointerDown={(e) => onPointerDown(e, piece)}
                     onDoubleClick={(e) => onDoubleClick(e, piece)}
-                    onContextMenu={(e) => onContextRotate(e, piece.id)}
+                    onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); onContextRotate(e, piece.id); }}
                     className={`absolute cursor-grab active:cursor-grabbing touch-none select-none ${
                         piece.isLocked ? 'z-0 transition-all duration-500 ease-out' : 'z-10'
                     } ${isHintTarget ? 'z-50' : ''}`}
@@ -90,6 +91,7 @@ const PuzzlePieceLayer = memo(({
 
                     {piece.shape === 'classic' ? (
                         <div 
+                            draggable={false}
                             style={{
                                 width: '100%',
                                 height: '100%',
@@ -637,7 +639,7 @@ const GameBoard: React.FC<GameBoardProps> = ({ puzzle, onExit, onComplete }) => 
             aspectRatio: '1/1',
             touchAction: 'none' // Critical for browser handling
           }}
-          onContextMenu={(e) => e.preventDefault()}
+          onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); }}
         >
             {/* Grid Lines */}
             {style === 'classic' && (
