@@ -40,6 +40,7 @@ const PuzzlePieceLayer = memo(({
     puzzleSrc, 
     pieceRefs, 
     onPointerDown, 
+    onDoubleClick,
     onContextRotate, 
     hintPieceId, 
     showPreview 
@@ -48,6 +49,7 @@ const PuzzlePieceLayer = memo(({
     puzzleSrc: string;
     pieceRefs: React.MutableRefObject<Record<number, HTMLDivElement | null>>;
     onPointerDown: (e: React.PointerEvent, p: Piece) => void;
+    onDoubleClick: (e: React.MouseEvent, p: Piece) => void;
     onContextRotate: (e: React.MouseEvent, id: number) => void;
     hintPieceId: number | null;
     showPreview: boolean;
@@ -61,6 +63,7 @@ const PuzzlePieceLayer = memo(({
                     key={piece.id}
                     ref={(el) => { pieceRefs.current[piece.id] = el; }}
                     onPointerDown={(e) => onPointerDown(e, piece)}
+                    onDoubleClick={(e) => onDoubleClick(e, piece)}
                     onContextMenu={(e) => onContextRotate(e, piece.id)}
                     className={`absolute cursor-grab active:cursor-grabbing touch-none select-none ${
                         piece.isLocked ? 'z-0 transition-all duration-500 ease-out' : 'z-10'
@@ -174,6 +177,7 @@ const GameBoard: React.FC<GameBoardProps> = ({ puzzle, onExit, onComplete }) => 
   // Drag State (Mutable ref)
   const dragRef = useRef<{
     active: boolean;
+    isSticky: boolean;
     pieceId: number | null;
     startX: number;
     startY: number;
@@ -185,6 +189,7 @@ const GameBoard: React.FC<GameBoardProps> = ({ puzzle, onExit, onComplete }) => 
     initialPieces: Piece[];
   }>({
     active: false,
+    isSticky: false,
     pieceId: null,
     startX: 0,
     startY: 0,
@@ -260,8 +265,8 @@ const GameBoard: React.FC<GameBoardProps> = ({ puzzle, onExit, onComplete }) => 
           if (rafRef.current) cancelAnimationFrame(rafRef.current);
           window.removeEventListener('pointermove', handleWindowPointerMove);
           window.removeEventListener('pointerup', handleWindowPointerUp);
+          window.removeEventListener('pointerdown', handleStickyDrop);
           
-          // Safety: ensure board is interactive if we unmount/update mid-drag
           if (boardRef.current) {
               boardRef.current.style.pointerEvents = 'auto';
           }
@@ -315,48 +320,98 @@ const GameBoard: React.FC<GameBoardProps> = ({ puzzle, onExit, onComplete }) => 
       rafRef.current = requestAnimationFrame(updateDragVisuals);
   };
 
-  // --- Window Event Handlers ---
-  const handleWindowPointerMove = (e: PointerEvent) => {
-    if (!dragRef.current.active) return;
-    e.preventDefault(); 
-    dragRef.current.currentX = e.clientX;
-    dragRef.current.currentY = e.clientY;
+  // --- Core Drag Logic ---
+
+  const startDrag = (clientX: number, clientY: number, piece: Piece, isSticky: boolean) => {
+    if (boardRef.current) {
+        // For sticky drag, we MUST allow pointer events on board so we can detect the drop click
+        // For normal drag, we disable them to prevent interference, but enabling them is fine if we manage bubbling
+        boardRef.current.style.pointerEvents = isSticky ? 'auto' : 'none';
+    }
+
+    const groupMembers = pieces.filter(p => p.groupId === piece.groupId);
+    const groupCache: { id: number; el: HTMLDivElement; rotation: number }[] = [];
+    const startPositions: Record<number, {x: number, y: number}> = {};
+    
+    groupMembers.forEach(p => {
+        const el = pieceRefs.current[p.id];
+        if (el) {
+            groupCache.push({ id: p.id, el, rotation: p.rotation });
+            startPositions[p.id] = { x: p.currentX, y: p.currentY };
+            el.style.transition = 'none';
+            el.style.zIndex = '100';
+            el.style.boxShadow = '0 20px 30px rgba(0,0,0,0.3)'; 
+            el.style.transform = `rotate(${p.rotation}deg) scale(1.1)`;
+            
+            // If sticky, set pointer events to none on the dragged pieces so clicks pass through to board
+            if (isSticky) {
+                el.style.pointerEvents = 'none';
+            }
+        }
+    });
+
+    dragRef.current = {
+        active: true,
+        isSticky,
+        pieceId: piece.id,
+        startX: clientX,
+        startY: clientY,
+        currentX: clientX,
+        currentY: clientY,
+        groupCache,
+        startPositions,
+        startTime: Date.now(),
+        initialPieces: pieces 
+    };
+
+    window.addEventListener('pointermove', handleWindowPointerMove, { passive: false });
+    
+    if (isSticky) {
+        // Sticky drop is handled by a separate global click listener
+        setTimeout(() => {
+             window.addEventListener('pointerdown', handleStickyDrop, { once: true, capture: true });
+        }, 50); // Delay slightly to avoid catching the double-click release
+    } else {
+        window.addEventListener('pointerup', handleWindowPointerUp);
+    }
+
+    if (rafRef.current) cancelAnimationFrame(rafRef.current);
+    rafRef.current = requestAnimationFrame(updateDragVisuals);
   };
 
-  const handleWindowPointerUp = (e: PointerEvent) => {
-    if (!dragRef.current.active) return;
+  const endDrag = (endX: number, endY: number, wasSticky: boolean) => {
+    dragRef.current.active = false;
+    if (rafRef.current) cancelAnimationFrame(rafRef.current);
     
     window.removeEventListener('pointermove', handleWindowPointerMove);
     window.removeEventListener('pointerup', handleWindowPointerUp);
-    
-    // RESTORE POINTER EVENTS ON BOARD
+    window.removeEventListener('pointerdown', handleStickyDrop); // cleanup
+
     if (boardRef.current) {
         boardRef.current.style.pointerEvents = 'auto';
     }
-    
-    dragRef.current.active = false;
-    if (rafRef.current) cancelAnimationFrame(rafRef.current);
 
-    // Reset styles helper
+    const { startX, startY, startTime, pieceId, groupCache, startPositions, initialPieces } = dragRef.current;
+
+    // Cleanup styles
     const cleanupStyles = () => {
-        dragRef.current.groupCache.forEach(item => {
+        groupCache.forEach(item => {
             if (item.el) {
                 item.el.style.transform = '';
                 item.el.style.zIndex = '';
                 item.el.style.cursor = '';
                 item.el.style.boxShadow = '';
                 item.el.style.transition = '';
+                item.el.style.pointerEvents = ''; // Reset pointer events
             }
         });
     };
 
-    const { startX, startY, currentX, currentY, startTime, pieceId, groupCache, startPositions, initialPieces } = dragRef.current;
-
-    // Tap/Click Detection
-    const dist = Math.hypot(currentX - startX, currentY - startY);
+    // Tap Detection (Only for non-sticky regular clicks)
+    const dist = Math.hypot(endX - startX, endY - startY);
     const time = Date.now() - startTime;
-
-    if (dist < 10 && time < 300 && pieceId !== null) {
+    
+    if (!wasSticky && dist < 10 && time < 300 && pieceId !== null) {
          cleanupStyles();
          performRotation(pieceId);
          return;
@@ -371,8 +426,8 @@ const GameBoard: React.FC<GameBoardProps> = ({ puzzle, onExit, onComplete }) => 
         const pieceW = 100 / settings.cols;
         const pieceH = 100 / settings.rows;
         
-        const totalDxPixels = currentX - startX;
-        const totalDyPixels = currentY - startY;
+        const totalDxPixels = endX - startX;
+        const totalDyPixels = endY - startY;
         
         const deltaCol = Math.round((totalDxPixels / rect.width) * settings.cols);
         const deltaRow = Math.round((totalDyPixels / rect.height) * settings.rows);
@@ -476,66 +531,40 @@ const GameBoard: React.FC<GameBoardProps> = ({ puzzle, onExit, onComplete }) => 
     cleanupStyles();
   };
 
+  // --- Event Handlers ---
+
+  const handleWindowPointerMove = (e: PointerEvent) => {
+    if (!dragRef.current.active) return;
+    e.preventDefault(); 
+    dragRef.current.currentX = e.clientX;
+    dragRef.current.currentY = e.clientY;
+  };
+
+  const handleWindowPointerUp = (e: PointerEvent) => {
+    if (!dragRef.current.active || dragRef.current.isSticky) return;
+    endDrag(e.clientX, e.clientY, false);
+  };
+
+  const handleStickyDrop = (e: PointerEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      endDrag(e.clientX, e.clientY, true);
+  };
 
   const handlePointerDown = useCallback((e: React.PointerEvent, piece: Piece) => {
     if (e.button !== 0 || piece.isLocked) return;
-    
     e.stopPropagation(); 
-    e.preventDefault(); // Prevent touch actions like scroll
+    e.preventDefault(); 
+    startDrag(e.clientX, e.clientY, piece, false);
+  }, [pieces]);
 
-    // ** OPTIMIZATION ** 
-    // Disable interaction on the board itself so we don't hit-test other tiles while dragging
-    if (boardRef.current) {
-        boardRef.current.style.pointerEvents = 'none';
-    }
-
-    const groupMembers = pieces.filter(p => p.groupId === piece.groupId);
-    const groupCache: { id: number; el: HTMLDivElement; rotation: number }[] = [];
-    const startPositions: Record<number, {x: number, y: number}> = {};
-    
-    groupMembers.forEach(p => {
-        const el = pieceRefs.current[p.id];
-        if (el) {
-            groupCache.push({ id: p.id, el, rotation: p.rotation });
-            startPositions[p.id] = { x: p.currentX, y: p.currentY };
-            // Instant Visual Feedback
-            el.style.transition = 'none';
-            el.style.zIndex = '100';
-            el.style.boxShadow = '0 20px 30px rgba(0,0,0,0.3)'; 
-            el.style.transform = `rotate(${p.rotation}deg) scale(1.1)`;
-        }
-    });
-
-    dragRef.current = {
-        active: true,
-        pieceId: piece.id,
-        startX: e.clientX,
-        startY: e.clientY,
-        currentX: e.clientX,
-        currentY: e.clientY,
-        groupCache,
-        startPositions,
-        startTime: Date.now(),
-        initialPieces: pieces 
-    };
-
-    window.addEventListener('pointermove', handleWindowPointerMove, { passive: false });
-    window.addEventListener('pointerup', handleWindowPointerUp);
-
-    if (rafRef.current) cancelAnimationFrame(rafRef.current);
-    rafRef.current = requestAnimationFrame(updateDragVisuals);
-  }, [pieces]); // Dependency on pieces is required so we grab fresh state snapshot
-
-  // Completion Check
-  useEffect(() => {
-    if (pieces.length > 0 && pieces.every(p => p.isLocked)) {
-      if (!isComplete) {
-          setIsComplete(true);
-          localStorage.removeItem(`mosaic_save_${puzzle.id}`);
-          if (onComplete) onComplete();
-      }
-    }
-  }, [pieces, isComplete, onComplete, puzzle.id]);
+  const handleDoubleClick = useCallback((e: React.MouseEvent, piece: Piece) => {
+      if (piece.isLocked) return;
+      e.stopPropagation();
+      e.preventDefault();
+      // Double click starts "sticky" drag
+      startDrag(e.clientX, e.clientY, piece, true);
+  }, [pieces]);
 
 
   // UI Formatting
@@ -649,6 +678,7 @@ const GameBoard: React.FC<GameBoardProps> = ({ puzzle, onExit, onComplete }) => 
                     puzzleSrc={puzzle.src}
                     pieceRefs={pieceRefs}
                     onPointerDown={handlePointerDown}
+                    onDoubleClick={handleDoubleClick}
                     onContextRotate={(e, id) => { e.preventDefault(); performRotation(id); }}
                     hintPieceId={hintPieceId}
                     showPreview={showPreview}
