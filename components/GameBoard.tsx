@@ -7,7 +7,6 @@ import { DIFFICULTY_SETTINGS } from '../constants';
 // --- Sub-Components for Performance Isolation ---
 
 // 1. Timer Component (Memoized)
-// Isolates the 1-second tick re-renders from the main GameBoard to prevent drag stutter
 const GameTimer = memo(({ initialTime, onTimeUpdate }: { initialTime: number, onTimeUpdate: (t: number) => void }) => {
   const [time, setTime] = useState(initialTime);
   
@@ -34,7 +33,6 @@ const GameTimer = memo(({ initialTime, onTimeUpdate }: { initialTime: number, on
 GameTimer.displayName = 'GameTimer';
 
 // 2. Piece Layer (Memoized)
-// Prevents React from diffing the 100+ pieces when unrelated state (like UI overlays) changes
 const PuzzlePieceLayer = memo(({ 
     pieces, 
     puzzleSrc, 
@@ -189,6 +187,7 @@ const GameBoard: React.FC<GameBoardProps> = ({ puzzle, onExit, onComplete }) => 
     startY: number;
     currentX: number;
     currentY: number;
+    visualYOffset: number; // Offset for touch visibility (finger doesn't cover piece)
     groupCache: { id: number; el: HTMLDivElement; rotation: number }[];
     startPositions: Record<number, {x: number, y: number}>;
     startTime: number;
@@ -201,6 +200,7 @@ const GameBoard: React.FC<GameBoardProps> = ({ puzzle, onExit, onComplete }) => 
     startY: 0,
     currentX: 0,
     currentY: 0,
+    visualYOffset: 0,
     groupCache: [],
     startPositions: {},
     startTime: 0,
@@ -313,9 +313,10 @@ const GameBoard: React.FC<GameBoardProps> = ({ puzzle, onExit, onComplete }) => 
   const updateDragVisuals = () => {
       if (!dragRef.current.active) return;
       
-      const { startX, startY, currentX, currentY, groupCache } = dragRef.current;
+      const { startX, startY, currentX, currentY, groupCache, visualYOffset } = dragRef.current;
       const dx = currentX - startX;
-      const dy = currentY - startY;
+      // Apply the visual offset here. This makes the piece appear above the finger during drag.
+      const dy = (currentY - startY) + visualYOffset;
 
       for (let i = 0; i < groupCache.length; i++) {
           const item = groupCache[i];
@@ -328,16 +329,27 @@ const GameBoard: React.FC<GameBoardProps> = ({ puzzle, onExit, onComplete }) => 
 
   // --- Core Drag Logic ---
 
-  const startDrag = (clientX: number, clientY: number, piece: Piece, isSticky: boolean) => {
-    if (boardRef.current) {
-        // For sticky drag, we MUST allow pointer events on board so we can detect the drop click
-        // For normal drag, we disable them to prevent interference, but enabling them is fine if we manage bubbling
-        boardRef.current.style.pointerEvents = isSticky ? 'auto' : 'none';
+  const startDrag = (clientX: number, clientY: number, piece: Piece, isSticky: boolean, pointerType: string, event: React.PointerEvent | React.MouseEvent) => {
+    // Note: We removed the boardRef.style.pointerEvents logic that was causing issues on touch devices.
+    // Instead, we rely on standard bubbling and window listeners.
+
+    // Robust pointer capture for touch to ensure we don't lose the stream to scrolling
+    if (event.target instanceof Element && 'setPointerCapture' in event.target && event.type === 'pointerdown') {
+        try {
+            (event.target as Element).setPointerCapture((event as React.PointerEvent).pointerId);
+        } catch (e) {
+            // Ignore capture errors
+        }
     }
 
     const groupMembers = pieces.filter(p => p.groupId === piece.groupId);
     const groupCache: { id: number; el: HTMLDivElement; rotation: number }[] = [];
     const startPositions: Record<number, {x: number, y: number}> = {};
+    
+    // Determine Touch Offset (Android Optimization)
+    // If it's a touch event and not sticky mode, we shift the piece up so the user can see it.
+    // -75px is roughly enough to clear a thumb.
+    const visualYOffset = (pointerType === 'touch' && !isSticky) ? -75 : 0;
     
     groupMembers.forEach(p => {
         const el = pieceRefs.current[p.id];
@@ -347,7 +359,8 @@ const GameBoard: React.FC<GameBoardProps> = ({ puzzle, onExit, onComplete }) => 
             el.style.transition = 'none';
             el.style.zIndex = '100';
             el.style.boxShadow = '0 20px 30px rgba(0,0,0,0.3)'; 
-            el.style.transform = `rotate(${p.rotation}deg) scale(1.1)`;
+            // We apply the offset immediately in the transform so it "pops" up
+            el.style.transform = `translate3d(0, ${visualYOffset}px, 0) rotate(${p.rotation}deg) scale(1.1)`;
             
             // If sticky, set pointer events to none on the dragged pieces so clicks pass through to board
             if (isSticky) {
@@ -364,6 +377,7 @@ const GameBoard: React.FC<GameBoardProps> = ({ puzzle, onExit, onComplete }) => 
         startY: clientY,
         currentX: clientX,
         currentY: clientY,
+        visualYOffset,
         groupCache,
         startPositions,
         startTime: Date.now(),
@@ -379,6 +393,8 @@ const GameBoard: React.FC<GameBoardProps> = ({ puzzle, onExit, onComplete }) => 
         }, 50); // Delay slightly to avoid catching the double-click release
     } else {
         window.addEventListener('pointerup', handleWindowPointerUp);
+        // Also listen for cancel/leave just in case
+        window.addEventListener('pointercancel', handleWindowPointerUp);
     }
 
     if (rafRef.current) cancelAnimationFrame(rafRef.current);
@@ -391,13 +407,16 @@ const GameBoard: React.FC<GameBoardProps> = ({ puzzle, onExit, onComplete }) => 
     
     window.removeEventListener('pointermove', handleWindowPointerMove);
     window.removeEventListener('pointerup', handleWindowPointerUp);
+    window.removeEventListener('pointercancel', handleWindowPointerUp);
     window.removeEventListener('pointerdown', handleStickyDrop); // cleanup
 
-    if (boardRef.current) {
-        boardRef.current.style.pointerEvents = 'auto';
+    // Reset pointer events if we messed with them (sticky mode)
+    if (wasSticky) {
+        // We iterate pieces because we set pointerEvents='none' on them in sticky mode
+        // But we can just rely on the cleanupStyles loop below which resets everything.
     }
 
-    const { startX, startY, startTime, pieceId, groupCache, startPositions, initialPieces } = dragRef.current;
+    const { startX, startY, startTime, pieceId, groupCache, startPositions, initialPieces, visualYOffset } = dragRef.current;
 
     // Cleanup styles
     const cleanupStyles = () => {
@@ -433,7 +452,8 @@ const GameBoard: React.FC<GameBoardProps> = ({ puzzle, onExit, onComplete }) => 
         const pieceH = 100 / settings.rows;
         
         const totalDxPixels = endX - startX;
-        const totalDyPixels = endY - startY;
+        // IMPORTANT: We must correct the dy by adding the offset back.
+        const totalDyPixels = (endY - startY) + visualYOffset;
         
         const deltaCol = Math.round((totalDxPixels / rect.width) * settings.cols);
         const deltaRow = Math.round((totalDyPixels / rect.height) * settings.rows);
@@ -464,9 +484,22 @@ const GameBoard: React.FC<GameBoardProps> = ({ puzzle, onExit, onComplete }) => 
                 Math.abs(p.currentY - mTargetY) < 1
             );
             
-            if (resident && resident.isLocked) {
-                validMove = false;
-                break;
+            if (resident) {
+                if (resident.isLocked) {
+                    validMove = false;
+                    break;
+                }
+
+                // NEW CHECK: Only allow displacing a resident if we are placing the piece
+                // into its correct solution location. Otherwise, bounce back.
+                const isCorrectDestination = 
+                    Math.abs(mTargetX - member.correctX) < 0.1 && 
+                    Math.abs(mTargetY - member.correctY) < 0.1;
+
+                if (!isCorrectDestination) {
+                    validMove = false;
+                    break;
+                }
             }
             
             swapRequests.push({
@@ -532,6 +565,12 @@ const GameBoard: React.FC<GameBoardProps> = ({ puzzle, onExit, onComplete }) => 
                 }
             }
             setPieces(newPieces);
+            
+            // Check completion
+            if (newPieces.every(p => p.isLocked)) {
+                setIsComplete(true);
+                if (onComplete) onComplete();
+            }
         }
     }
     cleanupStyles();
@@ -561,15 +600,17 @@ const GameBoard: React.FC<GameBoardProps> = ({ puzzle, onExit, onComplete }) => 
     if (e.button !== 0 || piece.isLocked) return;
     e.stopPropagation(); 
     e.preventDefault(); 
-    startDrag(e.clientX, e.clientY, piece, false);
+    startDrag(e.clientX, e.clientY, piece, false, e.pointerType, e);
   }, [pieces]);
 
   const handleDoubleClick = useCallback((e: React.MouseEvent, piece: Piece) => {
       if (piece.isLocked) return;
       e.stopPropagation();
       e.preventDefault();
-      // Double click starts "sticky" drag
-      startDrag(e.clientX, e.clientY, piece, true);
+      // Double click starts "sticky" drag. We treat this as a mouse-like interaction (no offset)
+      // because the user isn't holding the screen.
+      // We don't have the original PointerEvent here easily, but mouse doesn't need capture.
+      startDrag(e.clientX, e.clientY, piece, true, 'mouse', e);
   }, [pieces]);
 
 
@@ -695,6 +736,7 @@ const GameBoard: React.FC<GameBoardProps> = ({ puzzle, onExit, onComplete }) => 
             {/* Full Preview Overlay */}
             <div 
                 className={`absolute inset-0 z-50 transition-all duration-300 pointer-events-none origin-center ${showPreview ? 'opacity-100 scale-100' : 'opacity-0 scale-95'}`}
+                style={{ visibility: showPreview ? 'visible' : 'hidden' }}
             >
                 <img src={puzzle.src} className="w-full h-full object-cover rounded-lg shadow-2xl" alt="preview" />
             </div>
