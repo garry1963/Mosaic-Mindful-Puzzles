@@ -79,6 +79,8 @@ const PuzzlePieceLayer = memo(({
                         opacity: showPreview ? 0 : 1,
                         // Optimize painting
                         willChange: 'transform',
+                        // Disable touch callout (iOS long press menu)
+                        WebkitTouchCallout: 'none',
                     }}
                 >
                     {/* Visual highlighter for hint */}
@@ -97,7 +99,8 @@ const PuzzlePieceLayer = memo(({
                                 border: isHintTarget ? '3px solid #facc15' : (piece.isLocked ? 'none' : '1px solid rgba(255,255,255,0.6)'),
                                 // Use performant box-shadow instead of filters
                                 boxShadow: piece.isLocked ? 'none' : '0 4px 6px rgba(0,0,0,0.15), 0 1px 3px rgba(0,0,0,0.1)',
-                                borderRadius: '3px'
+                                borderRadius: '3px',
+                                WebkitTouchCallout: 'none'
                             }}
                         >
                              {/* Highlight/Sheen effect */}
@@ -110,7 +113,7 @@ const PuzzlePieceLayer = memo(({
                             viewBox={piece.viewBox}
                             width="100%" 
                             height="100%"
-                            style={{ overflow: 'visible' }}
+                            style={{ overflow: 'visible', WebkitTouchCallout: 'none' }}
                         >
                             <defs>
                                 <clipPath id={`clip-${piece.id}`}>
@@ -124,6 +127,7 @@ const PuzzlePieceLayer = memo(({
                                     width="100" height="100" 
                                     preserveAspectRatio="none"
                                     clipPath={`url(#clip-${piece.id})`}
+                                    style={{ pointerEvents: 'none' }} 
                                 />
                                 {!piece.isLocked && (
                                     <path 
@@ -633,6 +637,7 @@ const GameBoard: React.FC<GameBoardProps> = ({ puzzle, onExit, onComplete }) => 
             aspectRatio: '1/1',
             touchAction: 'none' // Critical for browser handling
           }}
+          onContextMenu={(e) => e.preventDefault()}
         >
             {/* Grid Lines */}
             {style === 'classic' && (
