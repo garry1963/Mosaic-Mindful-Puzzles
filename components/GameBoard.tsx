@@ -547,7 +547,7 @@ const GameBoard: React.FC<GameBoardProps> = ({ puzzle, onExit, onComplete }) => 
     <div className="fixed inset-0 bg-slate-100 flex flex-col overflow-hidden touch-none select-none">
       
       {/* 1. Header (Info & Exit) - Kept high and out of way */}
-      <header className="h-16 px-4 md:px-8 flex items-center justify-between z-30 bg-white/80 backdrop-blur-md border-b border-slate-200/60 shadow-sm">
+      <header className="px-4 md:px-8 flex items-center justify-between z-30 bg-white/80 backdrop-blur-md border-b border-slate-200/60 shadow-sm pt-safe-top h-auto py-3">
         <button 
             onClick={onExit} 
             className="w-12 h-12 flex items-center justify-center rounded-full hover:bg-slate-100 text-slate-500 active:bg-slate-200 transition-all active:scale-95"
@@ -665,7 +665,7 @@ const GameBoard: React.FC<GameBoardProps> = ({ puzzle, onExit, onComplete }) => 
       </div>
 
       {/* 3. Bottom Control Dock (Thumb Zone) */}
-      <div className="h-auto pb-10 pt-4 px-6 flex items-center justify-center gap-6 z-40 pointer-events-none">
+      <div className="h-auto px-6 flex items-center justify-center gap-6 z-40 pointer-events-none pb-safe-bottom">
          <div className="pointer-events-auto flex items-center gap-3 bg-white/90 backdrop-blur-xl p-3 rounded-3xl shadow-2xl border border-white/40 ring-1 ring-black/5">
              
              {/* Restart */}

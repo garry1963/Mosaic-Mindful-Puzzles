@@ -2,7 +2,9 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+    <meta name="theme-color" content="#f8fafc" />
+    <meta name="mobile-web-app-capable" content="yes" />
     <title>Mosaic: Mindful Puzzles</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
@@ -14,6 +16,10 @@
         color: #0f172a; /* Slate 900 */
         overflow: hidden; /* Prevent scrolling while dragging */
         touch-action: none;
+        overscroll-behavior: none; /* Prevent pull-to-refresh on Android */
+        -webkit-tap-highlight-color: transparent; /* Remove tap highlight on Android */
+        -webkit-user-select: none;
+        user-select: none;
       }
       
       h1, h2, h3, h4, h5, h6 {
@@ -38,6 +44,14 @@
         backdrop-filter: blur(12px);
         -webkit-backdrop-filter: blur(12px);
         border: 1px solid rgba(255, 255, 255, 0.5);
+      }
+
+      /* Android/Mobile Safe Area Utilities */
+      .pt-safe-top {
+        padding-top: max(1rem, env(safe-area-inset-top));
+      }
+      .pb-safe-bottom {
+        padding-bottom: max(2rem, env(safe-area-inset-bottom));
       }
     </style>
   <script type="importmap">

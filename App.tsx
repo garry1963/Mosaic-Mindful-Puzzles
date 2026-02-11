@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Home, Puzzle, Settings, Image as ImageIcon, Sparkles, Clock, ArrowLeft, RotateCcw, Flame, Play, ChevronRight, Wand2, History, Layers, HelpCircle, X, MousePointer2, RotateCw, Shapes, Eye, Lightbulb, Zap } from 'lucide-react';
+import { Home, Puzzle, Settings, Image as ImageIcon, Sparkles, Clock, ArrowLeft, RotateCcw, Flame, Play, ChevronRight, Wand2, History, Layers, HelpCircle, X, MousePointer2, RotateCw, Shapes, Eye, Lightbulb, Zap, Check } from 'lucide-react';
 import GameBoard from './components/GameBoard';
 import { generateImage } from './services/geminiService';
 import { GameState, Difficulty, PuzzleConfig, AppView, GeneratedImage } from './types';
@@ -12,6 +12,7 @@ const App: React.FC = () => {
   const [isGenerating, setIsGenerating] = useState(false);
   const [promptInput, setPromptInput] = useState('');
   const [savedGameIds, setSavedGameIds] = useState<Set<string>>(new Set());
+  const [completedPuzzleIds, setCompletedPuzzleIds] = useState<Set<string>>(new Set());
   const [showHowToPlay, setShowHowToPlay] = useState(false);
   
   // Gallery State (starts with initial, extends with discoveries)
@@ -35,10 +36,39 @@ const App: React.FC = () => {
       setSavedGameIds(saves);
   };
 
-  // Initialize: Load streak & Add new daily discovery puzzle & Check saves
+  // Android Back Button Handling (History API)
+  useEffect(() => {
+    const handlePopState = (event: PopStateEvent) => {
+        // When hardware back button is pressed, or history.back() is called
+        if (currentView !== 'home') {
+            setCurrentView('home');
+            setSelectedPuzzle(null);
+            checkForSavedGames();
+        }
+    };
+
+    window.addEventListener('popstate', handlePopState);
+    
+    // Set initial history state
+    window.history.replaceState({ view: 'home' }, '');
+
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, [currentView]);
+
+  // Initialize: Load streak, Completed Puzzles, Add new daily discovery puzzle & Check saves
   useEffect(() => {
     // 0. Check Saves
     checkForSavedGames();
+
+    // 0.5 Load Completed Puzzles
+    try {
+        const savedCompleted = localStorage.getItem('mosaic_completed_ids');
+        if (savedCompleted) {
+            setCompletedPuzzleIds(new Set(JSON.parse(savedCompleted)));
+        }
+    } catch (e) {
+        console.error("Failed to load completed puzzles", e);
+    }
 
     // 1. Streak Logic
     const storedStreak = parseInt(localStorage.getItem('mosaic_streak') || '0');
@@ -154,25 +184,35 @@ const App: React.FC = () => {
   };
 
   const startPuzzle = (puzzle: PuzzleConfig) => {
+    // Push history state so Android Back button works
+    window.history.pushState({ view: 'game' }, '');
     setSelectedPuzzle(puzzle);
     setCurrentView('game');
   };
 
+  const navigateToView = (view: AppView) => {
+    // Push history state so Android Back button works
+    window.history.pushState({ view }, '');
+    setCurrentView(view);
+  };
+
   const handleBack = () => {
-    if (currentView === 'game') {
-      setCurrentView('home');
-      setSelectedPuzzle(null);
-      checkForSavedGames(); // Refresh saves list
-    } else {
-      setCurrentView('home');
-    }
+    // Trigger popstate, which handles the view change logic
+    window.history.back();
   };
   
   const handlePuzzleComplete = () => {
-     // Remove save file if exists
      if (selectedPuzzle) {
+        // 1. Remove in-progress save
         localStorage.removeItem(`mosaic_save_${selectedPuzzle.id}`);
+        
+        // 2. Mark as completed (persist to localStorage)
+        const newCompleted = new Set(completedPuzzleIds);
+        newCompleted.add(selectedPuzzle.id);
+        setCompletedPuzzleIds(newCompleted);
+        localStorage.setItem('mosaic_completed_ids', JSON.stringify(Array.from(newCompleted)));
      }
+     
      checkForSavedGames();
 
      if (selectedPuzzle && selectedPuzzle.isDaily) {
@@ -265,7 +305,10 @@ const App: React.FC = () => {
     </div>
   );
 
-  const renderHome = () => (
+  const renderHome = () => {
+    const isDailyCompleted = completedPuzzleIds.has(INITIAL_PUZZLES[0].id);
+
+    return (
     <div className="flex flex-col h-screen w-full max-w-5xl mx-auto p-6 lg:p-12 relative overflow-y-auto custom-scrollbar">
       {/* Background Decorative Elements */}
       <div className="fixed top-0 left-0 w-full h-full overflow-hidden -z-10 pointer-events-none">
@@ -317,8 +360,12 @@ const App: React.FC = () => {
                             <span className="text-xs text-orange-100 uppercase tracking-wide font-medium">Streak</span>
                         </div>
                     )}
-                    <button className="bg-white text-orange-600 px-10 py-4 rounded-full font-bold text-lg shadow-lg hover:bg-orange-50 transition-colors flex items-center gap-3 active:scale-95">
-                        <Play size={20} className="fill-orange-600" /> Play Now
+                    <button className={`px-10 py-4 rounded-full font-bold text-lg shadow-lg transition-colors flex items-center gap-3 active:scale-95 ${isDailyCompleted ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200' : 'bg-white text-orange-600 hover:bg-orange-50'}`}>
+                        {isDailyCompleted ? (
+                             <><Check size={24} /> Completed</>
+                        ) : (
+                             <><Play size={20} className="fill-current" /> Play Now</>
+                        )}
                     </button>
                 </div>
             </div>
@@ -329,7 +376,7 @@ const App: React.FC = () => {
       <div className="grid grid-cols-1 md:grid-cols-2 gap-8 pb-10 flex-shrink-0">
         {/* Gallery Card */}
         <div className="group bg-white p-8 md:p-10 rounded-[2.5rem] shadow-sm border border-slate-100 transition-all duration-300 hover:shadow-xl hover:-translate-y-1 hover:border-indigo-100 cursor-pointer relative overflow-hidden active:scale-[0.99]"
-             onClick={() => setCurrentView('gallery')}>
+             onClick={() => navigateToView('gallery')}>
           <div className="absolute top-0 right-0 p-8 opacity-5 group-hover:opacity-10 transition-opacity transform group-hover:scale-110 duration-700">
               <ImageIcon size={140} />
           </div>
@@ -346,7 +393,7 @@ const App: React.FC = () => {
 
         {/* AI Studio Card */}
         <div className="group bg-white p-8 md:p-10 rounded-[2.5rem] shadow-sm border border-slate-100 transition-all duration-300 hover:shadow-xl hover:-translate-y-1 hover:border-emerald-100 cursor-pointer relative overflow-hidden active:scale-[0.99]"
-             onClick={() => setCurrentView('create')}>
+             onClick={() => navigateToView('create')}>
           <div className="absolute top-0 right-0 p-8 opacity-5 group-hover:opacity-10 transition-opacity transform group-hover:scale-110 duration-700">
               <Sparkles size={140} />
           </div>
@@ -363,6 +410,7 @@ const App: React.FC = () => {
       </div>
     </div>
   );
+  };
 
   const renderGallery = () => {
     // Filter categories
@@ -421,6 +469,8 @@ const App: React.FC = () => {
         {filteredPuzzles.map((puzzle, index) => {
           if (!puzzle) return null;
           const hasSave = savedGameIds.has(puzzle.id);
+          const isCompleted = completedPuzzleIds.has(puzzle.id);
+          
           return (
           <div key={puzzle.id} 
                onClick={() => startPuzzle(puzzle)}
@@ -428,12 +478,20 @@ const App: React.FC = () => {
                className="group bg-white rounded-3xl shadow-sm hover:shadow-xl transition-all duration-300 hover:-translate-y-1 overflow-hidden border border-slate-100 flex flex-col cursor-pointer active:scale-[0.98]">
             <div className="relative aspect-square overflow-hidden bg-slate-100">
                 <img src={puzzle.src} alt={puzzle.title} className="w-full h-full object-cover" />
-                {/* Persistent overlay for touch devices, but subtle */}
-                <div className="absolute inset-0 bg-black/10 flex items-center justify-center">
-                    <div className="bg-white/90 p-4 rounded-full shadow-lg">
-                        <Play size={24} className="fill-indigo-600 text-indigo-600 ml-1" />
+                
+                {isCompleted ? (
+                    <div className="absolute inset-0 bg-emerald-900/20 flex items-center justify-center">
+                         <div className="bg-emerald-500 text-white p-3 rounded-full shadow-lg animate-in zoom-in duration-300">
+                             <Check size={24} strokeWidth={3} />
+                         </div>
                     </div>
-                </div>
+                ) : (
+                    <div className="absolute inset-0 bg-black/10 flex items-center justify-center">
+                        <div className="bg-white/90 p-4 rounded-full shadow-lg">
+                            <Play size={24} className="fill-indigo-600 text-indigo-600 ml-1" />
+                        </div>
+                    </div>
+                )}
             </div>
             
             <div className="p-5 flex flex-col gap-2">
@@ -452,11 +510,18 @@ const App: React.FC = () => {
                 </div>
                 <h3 className="font-serif text-lg text-slate-800 leading-tight truncate" title={puzzle.title}>{puzzle.title}</h3>
                 
-                {hasSave && (
-                   <div className="mt-1 flex items-center gap-1.5 text-xs font-medium text-amber-600 bg-amber-50 px-2.5 py-1 rounded-md w-fit border border-amber-100">
-                      <History size={12} /> Resume
-                   </div>
-                )}
+                <div className="flex flex-wrap gap-2 mt-1">
+                    {hasSave && (
+                       <div className="flex items-center gap-1.5 text-xs font-medium text-amber-600 bg-amber-50 px-2.5 py-1 rounded-md w-fit border border-amber-100">
+                          <History size={12} /> Resume
+                       </div>
+                    )}
+                    {isCompleted && (
+                       <div className="flex items-center gap-1.5 text-xs font-bold text-emerald-600 bg-emerald-50 px-2.5 py-1 rounded-md w-fit border border-emerald-100 uppercase tracking-wide">
+                          <Check size={12} strokeWidth={3} /> Solved
+                       </div>
+                    )}
+                </div>
             </div>
           </div>
         )})}
@@ -529,6 +594,7 @@ const App: React.FC = () => {
         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6 overflow-y-auto custom-scrollbar pb-10 flex-shrink-0">
           {generatedImages.map((img, index) => {
             const hasSave = savedGameIds.has(img.id);
+            const isCompleted = completedPuzzleIds.has(img.id);
             return (
             <div key={img.id} 
                  onClick={() => startPuzzle({ id: img.id, src: img.src, title: img.title, difficulty: 'normal' })}
@@ -536,11 +602,20 @@ const App: React.FC = () => {
                  style={{ animationDelay: `${index * 100}ms` }}>
               <div className="relative aspect-square overflow-hidden bg-slate-100">
                  <img src={img.src} alt={img.title} className="w-full h-full object-cover" />
-                 <div className="absolute inset-0 bg-black/10 flex items-center justify-center">
-                    <div className="bg-white/90 p-3 rounded-full shadow-lg">
-                        <Play size={20} className="fill-indigo-600 text-indigo-600 ml-0.5" />
+                 
+                 {isCompleted ? (
+                    <div className="absolute inset-0 bg-emerald-900/20 flex items-center justify-center">
+                         <div className="bg-emerald-500 text-white p-3 rounded-full shadow-lg">
+                             <Check size={20} strokeWidth={3} />
+                         </div>
                     </div>
-                </div>
+                ) : (
+                     <div className="absolute inset-0 bg-black/10 flex items-center justify-center">
+                        <div className="bg-white/90 p-3 rounded-full shadow-lg">
+                            <Play size={20} className="fill-indigo-600 text-indigo-600 ml-0.5" />
+                        </div>
+                    </div>
+                )}
               </div>
               
               <div className="p-4 flex flex-col gap-1">
@@ -548,11 +623,19 @@ const App: React.FC = () => {
                     <Sparkles size={12} /> AI Generated
                  </div>
                  <span className="font-serif text-slate-800 truncate leading-tight text-lg">{img.title}</span>
-                 {hasSave && (
-                   <div className="mt-1 flex items-center gap-1 text-[10px] font-medium text-amber-600 bg-amber-50 px-2 py-0.5 rounded-md w-fit border border-amber-100">
-                      <History size={10} /> Resume
-                   </div>
-                 )}
+                 
+                 <div className="flex flex-wrap gap-2 mt-1">
+                    {hasSave && (
+                       <div className="flex items-center gap-1 text-[10px] font-medium text-amber-600 bg-amber-50 px-2 py-0.5 rounded-md w-fit border border-amber-100">
+                          <History size={10} /> Resume
+                       </div>
+                    )}
+                    {isCompleted && (
+                       <div className="flex items-center gap-1 text-[10px] font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-md w-fit border border-emerald-100 uppercase tracking-wide">
+                          <Check size={10} strokeWidth={3} /> Solved
+                       </div>
+                    )}
+                 </div>
               </div>
             </div>
           )})}
