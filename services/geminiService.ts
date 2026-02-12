@@ -6,8 +6,7 @@ const apiKey = process.env.API_KEY || '';
 
 export const generateImage = async (prompt: string): Promise<string | null> => {
   if (!apiKey) {
-    console.error("API Key is missing");
-    return null;
+    throw new Error("API Key is missing. Please check your configuration.");
   }
 
   try {

@@ -172,7 +172,6 @@ const GameBoard: React.FC<GameBoardProps> = ({ puzzle, onExit, onComplete }) => 
 
   // Time tracking via ref to avoid re-renders
   const elapsedTimeRef = useRef(0);
-  const autoSaveIntervalRef = useRef<number>(0);
   
   // Refs for High-Performance Dragging
   const boardRef = useRef<HTMLDivElement>(null);
@@ -187,7 +186,7 @@ const GameBoard: React.FC<GameBoardProps> = ({ puzzle, onExit, onComplete }) => 
     startY: number;
     currentX: number;
     currentY: number;
-    visualYOffset: number; // Offset for touch visibility (finger doesn't cover piece)
+    visualYOffset: number; 
     groupCache: { id: number; el: HTMLDivElement; rotation: number }[];
     startPositions: Record<number, {x: number, y: number}>;
     startTime: number;
@@ -213,6 +212,7 @@ const GameBoard: React.FC<GameBoardProps> = ({ puzzle, onExit, onComplete }) => 
   useEffect(() => {
     const saveKey = `mosaic_save_${puzzle.id}`;
     const savedDataStr = localStorage.getItem(saveKey);
+    let loadedFromSave = false;
     
     if (savedDataStr) {
         try {
@@ -224,14 +224,16 @@ const GameBoard: React.FC<GameBoardProps> = ({ puzzle, onExit, onComplete }) => 
                 elapsedTimeRef.current = savedGame.elapsedTime;
                 setHintsRemaining(savedGame.hintsRemaining);
                 setIsLoaded(true);
-                return;
+                loadedFromSave = true;
             }
         } catch (e) {
             console.error("Failed to load save", e);
         }
     }
 
-    initializeNewGame(puzzle.difficulty || 'normal', 'classic');
+    if (!loadedFromSave) {
+        initializeNewGame(puzzle.difficulty || 'normal', 'classic');
+    }
   }, [puzzle.id]);
 
   const initializeNewGame = (diff: Difficulty, st: PuzzleStyle) => {
@@ -330,9 +332,6 @@ const GameBoard: React.FC<GameBoardProps> = ({ puzzle, onExit, onComplete }) => 
   // --- Core Drag Logic ---
 
   const startDrag = (clientX: number, clientY: number, piece: Piece, isSticky: boolean, pointerType: string, event: React.PointerEvent | React.MouseEvent) => {
-    // Note: We removed the boardRef.style.pointerEvents logic that was causing issues on touch devices.
-    // Instead, we rely on standard bubbling and window listeners.
-
     // Robust pointer capture for touch to ensure we don't lose the stream to scrolling
     if (event.target instanceof Element && 'setPointerCapture' in event.target && event.type === 'pointerdown') {
         try {
@@ -490,13 +489,43 @@ const GameBoard: React.FC<GameBoardProps> = ({ puzzle, onExit, onComplete }) => 
                     break;
                 }
 
-                // NEW CHECK: Only allow displacing a resident if we are placing the piece
-                // into its correct solution location. Otherwise, bounce back.
+                // CHECK 1: Is this the correct final destination?
                 const isCorrectDestination = 
                     Math.abs(mTargetX - member.correctX) < 0.1 && 
                     Math.abs(mTargetY - member.correctY) < 0.1;
 
-                if (!isCorrectDestination) {
+                // CHECK 2: Is it next to a correct matching neighbor?
+                let isNextToMatchingNeighbor = false;
+                const directions = [{ dc: 1, dr: 0 }, { dc: 0, dr: 1 }, { dc: -1, dr: 0 }, { dc: 0, dr: -1 }];
+                
+                for (const n of directions) {
+                    const nX = (mTargetCol + n.dc) * pieceW;
+                    const nY = (mTargetRow + n.dr) * pieceH;
+                    
+                    const neighborPiece = initialPieces.find(p => 
+                        p.groupId !== draggedPiece.groupId && 
+                        p.id !== resident.id && // Don't check against the resident we are displacing
+                        Math.abs(p.currentX - nX) < 1 &&
+                        Math.abs(p.currentY - nY) < 1
+                    );
+
+                    if (neighborPiece) {
+                        const correctDX = neighborPiece.correctX - member.correctX;
+                        const correctDY = neighborPiece.correctY - member.correctY;
+                        const expectedDX = n.dc * pieceW;
+                        const expectedDY = n.dr * pieceH;
+                        
+                        if (Math.abs(correctDX - expectedDX) < 1 && 
+                            Math.abs(correctDY - expectedDY) < 1 && 
+                            member.rotation === neighborPiece.rotation) {
+                            isNextToMatchingNeighbor = true;
+                            break;
+                        }
+                    }
+                }
+
+                // If neither correct destination nor a valid neighbor connect, reject the move
+                if (!isCorrectDestination && !isNextToMatchingNeighbor) {
                     validMove = false;
                     break;
                 }
@@ -607,9 +636,6 @@ const GameBoard: React.FC<GameBoardProps> = ({ puzzle, onExit, onComplete }) => 
       if (piece.isLocked) return;
       e.stopPropagation();
       e.preventDefault();
-      // Double click starts "sticky" drag. We treat this as a mouse-like interaction (no offset)
-      // because the user isn't holding the screen.
-      // We don't have the original PointerEvent here easily, but mouse doesn't need capture.
       startDrag(e.clientX, e.clientY, piece, true, 'mouse', e);
   }, [pieces]);
 

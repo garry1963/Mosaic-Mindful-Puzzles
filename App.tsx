@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Home, Puzzle, Settings, Image as ImageIcon, Sparkles, Clock, ArrowLeft, RotateCcw, Flame, Play, ChevronRight, Wand2, History, Layers, HelpCircle, X, MousePointer2, RotateCw, Shapes, Eye, Lightbulb, Zap, Check } from 'lucide-react';
+import { Home, Puzzle, Settings, Image as ImageIcon, Sparkles, Clock, ArrowLeft, RotateCcw, Flame, Play, ChevronRight, Wand2, History, Layers, HelpCircle, X, MousePointer2, RotateCw, Shapes, Eye, Lightbulb, Zap, Check, CloudDownload, WifiOff, Activity, AlertTriangle } from 'lucide-react';
 import GameBoard from './components/GameBoard';
 import { generateImage } from './services/geminiService';
+import { syncPuzzleImage, getFullQualityImage, saveGeneratedPuzzle, loadSavedGeneratedPuzzles, persistGeneratedMetadata } from './services/offlineStorage';
 import { GameState, Difficulty, PuzzleConfig, AppView, GeneratedImage } from './types';
 import { INITIAL_PUZZLES } from './constants';
 
@@ -15,13 +16,22 @@ const App: React.FC = () => {
   const [completedPuzzleIds, setCompletedPuzzleIds] = useState<Set<string>>(new Set());
   const [showHowToPlay, setShowHowToPlay] = useState(false);
   
-  // Gallery State (starts with initial, extends with discoveries)
+  // Error State for graceful failure handling
+  const [error, setError] = useState<{title: string, message: string} | null>(null);
+  
+  // Gallery State
   const [galleryPuzzles, setGalleryPuzzles] = useState<PuzzleConfig[]>(INITIAL_PUZZLES);
-  const [activeCategory, setActiveCategory] = useState<string>('Nature');
+  const [activeCategory, setActiveCategory] = useState<string>('Classic Cars');
+  const [thumbnails, setThumbnails] = useState<Record<string, string>>({});
+  const [syncProgress, setSyncProgress] = useState(0);
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [previewPuzzle, setPreviewPuzzle] = useState<PuzzleConfig | null>(null);
+  
   const initializationRef = useRef(false);
 
-  // Daily Streak State
+  // Daily Streak & Puzzle State
   const [streak, setStreak] = useState(0);
+  const [dailyPuzzle, setDailyPuzzle] = useState<PuzzleConfig | null>(null);
 
   // Check for saved games
   const checkForSavedGames = () => {
@@ -35,6 +45,20 @@ const App: React.FC = () => {
       }
       setSavedGameIds(saves);
   };
+
+  // Load Generated Images from IndexedDB (Migration handled in service)
+  useEffect(() => {
+    loadSavedGeneratedPuzzles().then(puzzles => {
+        setGeneratedImages(puzzles);
+    });
+  }, []);
+
+  // Persist Metadata only (no base64) when state changes
+  useEffect(() => {
+    if (generatedImages.length > 0) {
+        persistGeneratedMetadata(generatedImages);
+    }
+  }, [generatedImages]);
 
   // Android Back Button Handling (History API)
   useEffect(() => {
@@ -54,6 +78,43 @@ const App: React.FC = () => {
 
     return () => window.removeEventListener('popstate', handlePopState);
   }, [currentView]);
+
+  // Background Scraper / Sync
+  useEffect(() => {
+      const runSync = async () => {
+          setIsSyncing(true);
+          const allPuzzles = [...galleryPuzzles];
+          let completed = 0;
+          
+          // Process in chunks to avoid blocking UI
+          const CHUNK_SIZE = 5;
+          for (let i = 0; i < allPuzzles.length; i += CHUNK_SIZE) {
+              const chunk = allPuzzles.slice(i, i + CHUNK_SIZE);
+              
+              await Promise.all(chunk.map(async (p) => {
+                   // Skip if already has a generated thumbnail (unless it's a retry)
+                   if (thumbnails[p.id]) return;
+                   
+                   const result = await syncPuzzleImage(p);
+                   if (result.isLocal) {
+                       setThumbnails(prev => ({ ...prev, [p.id]: result.thumbUrl }));
+                   }
+              }));
+              
+              completed += chunk.length;
+              setSyncProgress(Math.min(100, Math.round((completed / allPuzzles.length) * 100)));
+              
+              // Small delay to yield to main thread
+              await new Promise(r => setTimeout(r, 50));
+          }
+          setIsSyncing(false);
+      };
+      
+      // Run sync when gallery changes (e.g. discovery added) or on mount
+      // Delay slightly to let app mount first
+      const timeout = setTimeout(runSync, 1000);
+      return () => clearTimeout(timeout);
+  }, [galleryPuzzles.length]); // Dependency on length so new discoveries trigger sync
 
   // Initialize: Load streak, Completed Puzzles, Add new daily discovery puzzle & Check saves
   useEffect(() => {
@@ -83,6 +144,17 @@ const App: React.FC = () => {
         setStreak(storedStreak);
     }
 
+    // 1.5 Generate Dynamic Daily Puzzle
+    const dateSeed = today.replace(/ /g, '-');
+    setDailyPuzzle({
+        id: `daily-${dateSeed}`,
+        title: `Daily Challenge: ${new Date().toLocaleDateString(undefined, { month: 'long', day: 'numeric' })}`,
+        src: `https://picsum.photos/seed/${dateSeed}/800/800`,
+        difficulty: 'normal',
+        category: 'Daily',
+        isDaily: true
+    });
+
     // 2. New Puzzle Discovery Logic (Run once per session/mount)
     if (!initializationRef.current) {
         initializationRef.current = true;
@@ -98,11 +170,10 @@ const App: React.FC = () => {
             }
         } catch (e) {
             console.error("Failed to parse discoveries from local storage", e);
-            // Reset if corrupt
             localStorage.removeItem('mosaic_discoveries');
         }
         
-        // Helper to extract picsum ID
+        // Ensure new discovery logic (same as before)
         const getPicsumId = (url: string) => {
             if (!url) return -1;
             const match = url.match(/\/id\/(\d+)\//);
@@ -117,11 +188,9 @@ const App: React.FC = () => {
             }
         });
 
-        // Try to find a new unique image ID
         let newId = -1;
         let attempts = 0;
         while (attempts < 50) {
-            // Picsum IDs go up to ~1084, picking safe range
             const candidate = Math.floor(Math.random() * 800) + 10; 
             if (!usedIds.has(candidate)) {
                 newId = candidate;
@@ -143,7 +212,6 @@ const App: React.FC = () => {
                 category: 'Discovery'
             };
 
-            // Add new puzzle to the front of discoveries (newest first)
             storedDiscoveries = [newPuzzle, ...storedDiscoveries];
             localStorage.setItem('mosaic_discoveries', JSON.stringify(storedDiscoveries));
         }
@@ -152,61 +220,86 @@ const App: React.FC = () => {
     }
   }, []);
 
-  // Update saved games when view changes (e.g. coming back from a game)
+  // Update saved games when view changes
   useEffect(() => {
     if (currentView !== 'game') {
         checkForSavedGames();
     }
   }, [currentView]);
 
-  // AI Generation Handler
   const handleGeneratePuzzle = async () => {
     if (!promptInput.trim()) return;
     setIsGenerating(true);
+    setError(null);
     try {
       const base64Image = await generateImage(promptInput);
       if (base64Image) {
+        const newId = `gen-${Date.now()}`;
+        
+        // Save to IndexedDB and get Object URL
+        const objectUrl = await saveGeneratedPuzzle(newId, base64Image);
+        
         const newPuzzle: GeneratedImage = {
-          id: `gen-${Date.now()}`,
-          src: base64Image,
+          id: newId,
+          src: objectUrl, // Use blob URL for display
           title: promptInput,
           isAi: true
         };
+        
         setGeneratedImages(prev => [newPuzzle, ...prev]);
         setPromptInput('');
+      } else {
+        throw new Error("No image data received.");
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error("Failed to generate puzzle:", error);
-      alert("Could not generate image. Please check API Key or try a different prompt.");
+      
+      let title = "Generation Failed";
+      let message = "Could not generate image. Please try again.";
+      
+      const errStr = error.toString().toLowerCase();
+      const errMsg = error.message?.toLowerCase() || "";
+
+      // Check for specific API Quota / Rate Limit errors
+      if (errStr.includes('429') || errMsg.includes('quota') || errMsg.includes('resource exhausted') || errStr.includes('too many requests')) {
+          title = "Quota Exceeded";
+          message = "You have reached the API usage limit. Please try again later.";
+      } else if (errMsg.includes('api key')) {
+          title = "Configuration Error";
+          message = "API Key is missing or invalid.";
+      }
+
+      setError({ title, message });
     } finally {
       setIsGenerating(false);
     }
   };
 
-  const startPuzzle = (puzzle: PuzzleConfig) => {
-    // Push history state so Android Back button works
+  const startPuzzle = async (puzzle: PuzzleConfig) => {
+    // Check if we have a high-res local version
+    const localSrc = await getFullQualityImage(puzzle.id, puzzle.src);
+    
+    // Create a modified puzzle config with the local source
+    const puzzleToStart = { ...puzzle, src: localSrc };
+
     window.history.pushState({ view: 'game' }, '');
-    setSelectedPuzzle(puzzle);
+    setSelectedPuzzle(puzzleToStart);
     setCurrentView('game');
   };
 
   const navigateToView = (view: AppView) => {
-    // Push history state so Android Back button works
     window.history.pushState({ view }, '');
     setCurrentView(view);
   };
 
   const handleBack = () => {
-    // Trigger popstate, which handles the view change logic
     window.history.back();
   };
   
   const handlePuzzleComplete = () => {
      if (selectedPuzzle) {
-        // 1. Remove in-progress save
         localStorage.removeItem(`mosaic_save_${selectedPuzzle.id}`);
         
-        // 2. Mark as completed (persist to localStorage)
         const newCompleted = new Set(completedPuzzleIds);
         newCompleted.add(selectedPuzzle.id);
         setCompletedPuzzleIds(newCompleted);
@@ -222,12 +315,10 @@ const App: React.FC = () => {
          if (lastWin !== today) {
              const yesterday = new Date(Date.now() - 86400000).toDateString();
              const currentStored = parseInt(localStorage.getItem('mosaic_streak') || '0');
-             
              let newStreak = 1;
              if (lastWin === yesterday) {
                  newStreak = currentStored + 1;
              }
-             
              setStreak(newStreak);
              localStorage.setItem('mosaic_streak', newStreak.toString());
              localStorage.setItem('mosaic_last_win', today);
@@ -235,14 +326,13 @@ const App: React.FC = () => {
      }
   };
 
+  // ... (HowToPlay Component remains same) ...
   const renderHowToPlay = () => (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-sm p-4 animate-in fade-in duration-200" onClick={() => setShowHowToPlay(false)}>
       <div className="bg-white rounded-3xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto custom-scrollbar relative animate-in zoom-in-95 duration-200" onClick={(e) => e.stopPropagation()}>
-         {/* Close button */}
          <button onClick={() => setShowHowToPlay(false)} className="absolute top-4 right-4 p-3 hover:bg-slate-100 rounded-full text-slate-500 transition-colors">
            <X size={28} />
          </button>
-         
          <div className="p-8 md:p-10">
            <div className="flex items-center gap-3 mb-8">
               <div className="bg-indigo-100 p-3 rounded-xl text-indigo-600">
@@ -250,7 +340,6 @@ const App: React.FC = () => {
               </div>
               <h2 className="text-3xl font-serif text-slate-800">How to Play</h2>
            </div>
-  
            <div className="space-y-8">
               <section>
                   <h3 className="text-lg font-bold text-slate-800 mb-3 flex items-center gap-2">
@@ -260,7 +349,6 @@ const App: React.FC = () => {
                       Drag and drop pieces to reconstruct the image. When a piece is close to its correct position (and rotation), it will <strong className="text-indigo-600">snap</strong> and lock into place.
                   </p>
               </section>
-  
               <section className="grid md:grid-cols-2 gap-6">
                   <div className="bg-slate-50 p-6 rounded-2xl border border-slate-100">
                        <h3 className="font-bold text-slate-800 mb-3 flex items-center gap-2">
@@ -273,7 +361,6 @@ const App: React.FC = () => {
                        </p>
                   </div>
               </section>
-  
               <section>
                    <h3 className="text-lg font-bold text-slate-800 mb-4">Tools & Features</h3>
                    <ul className="space-y-4">
@@ -294,7 +381,6 @@ const App: React.FC = () => {
                    </ul>
               </section>
            </div>
-           
            <div className="mt-10 pt-6 border-t border-slate-100 flex justify-end">
               <button onClick={() => setShowHowToPlay(false)} className="px-8 py-4 bg-slate-900 text-white rounded-xl font-medium hover:bg-slate-800 transition-colors shadow-lg shadow-slate-900/10 text-lg">
                   Got it, let's play!
@@ -306,14 +392,46 @@ const App: React.FC = () => {
   );
 
   const renderHome = () => {
-    const isDailyCompleted = completedPuzzleIds.has(INITIAL_PUZZLES[0].id);
+    const isDailyCompleted = dailyPuzzle && completedPuzzleIds.has(dailyPuzzle.id);
+    const apiKeyExists = !!process.env.API_KEY;
 
     return (
     <div className="flex flex-col h-screen w-full max-w-5xl mx-auto p-6 lg:p-12 relative overflow-y-auto custom-scrollbar">
-      {/* Background Decorative Elements */}
       <div className="fixed top-0 left-0 w-full h-full overflow-hidden -z-10 pointer-events-none">
           <div className="absolute top-[-10%] right-[-5%] w-[500px] h-[500px] rounded-full bg-indigo-100/50 blur-3xl"></div>
           <div className="absolute bottom-[-10%] left-[-10%] w-[600px] h-[600px] rounded-full bg-rose-50/50 blur-3xl"></div>
+      </div>
+      
+      {/* API Dashboard Stats */}
+      <div className="absolute top-6 left-6 flex flex-col gap-3 z-10 md:top-10 md:left-10">
+          {/* Status Card */}
+          <div className="flex items-center gap-3 px-4 py-3 bg-white/90 backdrop-blur-md rounded-2xl shadow-sm border border-slate-200/60 transition-all hover:scale-105 select-none">
+              <div className="relative flex h-3 w-3">
+                  {apiKeyExists && <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>}
+                  <span className={`relative inline-flex rounded-full h-3 w-3 ${apiKeyExists ? 'bg-emerald-500' : 'bg-rose-500'}`}></span>
+              </div>
+              <div className="flex flex-col">
+                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider leading-none mb-0.5">API Status</span>
+                  <span className={`text-xs font-bold leading-none ${apiKeyExists ? 'text-slate-700' : 'text-rose-500'}`}>
+                      {apiKeyExists ? 'Connected' : 'No Key'}
+                  </span>
+              </div>
+          </div>
+
+          {/* Usage Card (Only if connected) */}
+          {apiKeyExists && (
+              <div className="flex items-center gap-3 px-4 py-3 bg-white/90 backdrop-blur-md rounded-2xl shadow-sm border border-slate-200/60 transition-all hover:scale-105 select-none delay-75 animate-in fade-in slide-in-from-left-2">
+                  <div className="bg-indigo-50 text-indigo-500 p-1 rounded-md">
+                      <Activity size={14} />
+                  </div>
+                  <div className="flex flex-col">
+                      <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider leading-none mb-0.5">Usage</span>
+                      <span className="text-xs font-bold text-slate-700 leading-none">
+                          {generatedImages.length} Gen{generatedImages.length !== 1 ? 's' : ''}
+                      </span>
+                  </div>
+              </div>
+          )}
       </div>
 
       <button 
@@ -329,14 +447,14 @@ const App: React.FC = () => {
         <p className="text-slate-500 text-lg md:text-xl font-light tracking-wide">Find your peace, piece by piece.</p>
       </header>
 
-      {/* Daily Challenge Banner */}
+      {dailyPuzzle && (
       <div className="mb-12 flex-shrink-0">
         <div 
             className="group relative overflow-hidden rounded-[2rem] cursor-pointer shadow-xl shadow-orange-900/10 transition-all duration-500 hover:shadow-2xl hover:shadow-orange-900/20 active:scale-[0.99]"
-            onClick={() => startPuzzle({ ...INITIAL_PUZZLES[0], difficulty: 'normal', isDaily: true })}
+            onClick={() => startPuzzle(dailyPuzzle)}
         >
             <div className="absolute inset-0 bg-gradient-to-br from-amber-500 to-orange-600 transition-transform duration-700 group-hover:scale-105"></div>
-            <div className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/cubes.png')] opacity-10"></div>
+            <div className="absolute inset-0 opacity-20 bg-cover bg-center mix-blend-overlay" style={{ backgroundImage: `url(${dailyPuzzle.src})` }}></div>
             
             <div className="relative p-8 md:p-12 flex flex-col md:flex-row items-center justify-between gap-6">
                 <div className="text-center md:text-left text-white">
@@ -346,8 +464,8 @@ const App: React.FC = () => {
                         </div>
                         <span className="text-sm font-bold uppercase tracking-widest text-orange-50">Daily Challenge</span>
                     </div>
-                    <h3 className="text-3xl md:text-4xl font-serif italic mb-2">Golden Hour in Kyoto</h3>
-                    <p className="text-orange-100 font-light max-w-md text-lg">Complete today's puzzle to keep your mindfulness streak alive.</p>
+                    <h3 className="text-3xl md:text-4xl font-serif italic mb-2">{dailyPuzzle.title}</h3>
+                    <p className="text-orange-100 font-light max-w-md text-lg">A new random puzzle every 24 hours.</p>
                 </div>
 
                 <div className="flex items-center gap-6">
@@ -371,10 +489,9 @@ const App: React.FC = () => {
             </div>
         </div>
       </div>
+      )}
 
-      {/* Main Mode Selection */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-8 pb-10 flex-shrink-0">
-        {/* Gallery Card */}
         <div className="group bg-white p-8 md:p-10 rounded-[2.5rem] shadow-sm border border-slate-100 transition-all duration-300 hover:shadow-xl hover:-translate-y-1 hover:border-indigo-100 cursor-pointer relative overflow-hidden active:scale-[0.99]"
              onClick={() => navigateToView('gallery')}>
           <div className="absolute top-0 right-0 p-8 opacity-5 group-hover:opacity-10 transition-opacity transform group-hover:scale-110 duration-700">
@@ -385,13 +502,12 @@ const App: React.FC = () => {
             <ImageIcon size={32} />
           </div>
           <h2 className="text-3xl font-medium text-slate-800 mb-3">Classic Gallery</h2>
-          <p className="text-slate-500 leading-relaxed mb-8 text-lg">Browse our curated collection of high-resolution photography and art.</p>
+          <p className="text-slate-500 leading-relaxed mb-8 text-lg">Browse collections including Classic Cars, Animals, and more.</p>
           <div className="flex items-center text-indigo-600 font-bold text-lg group-hover:translate-x-2 transition-transform">
               Explore Collection <ChevronRight size={20} />
           </div>
         </div>
 
-        {/* AI Studio Card */}
         <div className="group bg-white p-8 md:p-10 rounded-[2.5rem] shadow-sm border border-slate-100 transition-all duration-300 hover:shadow-xl hover:-translate-y-1 hover:border-emerald-100 cursor-pointer relative overflow-hidden active:scale-[0.99]"
              onClick={() => navigateToView('create')}>
           <div className="absolute top-0 right-0 p-8 opacity-5 group-hover:opacity-10 transition-opacity transform group-hover:scale-110 duration-700">
@@ -413,10 +529,8 @@ const App: React.FC = () => {
   };
 
   const renderGallery = () => {
-    // Filter categories
-    const categories = ['Nature', 'Urban', 'Spring', 'Summer', 'Autumn', 'Winter', 'Indoor', 'Discovery'];
+    const categories = ['Classic Cars', 'Animals', 'Disney', 'Nature', 'Urban', 'Spring', 'Summer', 'Autumn', 'Winter', 'Indoor', 'Discovery'];
     
-    // Ensure galleryPuzzles is an array before filtering
     const safePuzzles = Array.isArray(galleryPuzzles) ? galleryPuzzles : [];
     
     const filteredPuzzles = safePuzzles.filter(p => {
@@ -437,11 +551,18 @@ const App: React.FC = () => {
             </button>
             <div>
                 <h2 className="text-3xl text-slate-800">Puzzle Gallery</h2>
-                <p className="text-slate-500 text-sm">Select a masterpiece to begin</p>
+                <div className="flex items-center gap-2 text-slate-500 text-sm">
+                   {isSyncing ? (
+                      <span className="flex items-center gap-1.5 text-indigo-600 font-medium">
+                        <CloudDownload size={14} className="animate-pulse" /> Syncing library... {syncProgress}%
+                      </span>
+                   ) : (
+                      <span>Select a masterpiece to begin</span>
+                   )}
+                </div>
             </div>
         </div>
 
-        {/* Category Filters - Larger touch targets */}
         <div className="flex items-center gap-3 overflow-x-auto pb-4 md:pb-0 custom-scrollbar max-w-full">
             {categories.map(cat => (
                 <button 
@@ -465,60 +586,96 @@ const App: React.FC = () => {
             <p>No puzzles found in this category.</p>
         </div>
       ) : (
-      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6 overflow-y-auto custom-scrollbar pb-20 flex-1 min-h-0 pr-2">
+      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 overflow-y-auto custom-scrollbar pb-20 flex-1 min-h-0 pr-2">
         {filteredPuzzles.map((puzzle, index) => {
           if (!puzzle) return null;
           const hasSave = savedGameIds.has(puzzle.id);
           const isCompleted = completedPuzzleIds.has(puzzle.id);
           
+          // Use local thumbnail if available, else original src
+          const thumbSrc = thumbnails[puzzle.id] || puzzle.src;
+          
           return (
           <div key={puzzle.id} 
                onClick={() => startPuzzle(puzzle)}
                style={{ animationDelay: `${index * 50}ms` }}
-               className="group bg-white rounded-3xl shadow-sm hover:shadow-xl transition-all duration-300 hover:-translate-y-1 overflow-hidden border border-slate-100 flex flex-col cursor-pointer active:scale-[0.98]">
+               className="group bg-white rounded-2xl shadow-sm hover:shadow-xl transition-all duration-300 hover:-translate-y-1 overflow-hidden border border-slate-100 flex flex-col cursor-pointer active:scale-[0.98]">
             <div className="relative aspect-square overflow-hidden bg-slate-100">
-                <img src={puzzle.src} alt={puzzle.title} className="w-full h-full object-cover" />
+                <img 
+                    src={thumbSrc} 
+                    alt={puzzle.title} 
+                    className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-105" 
+                    loading="lazy" 
+                />
                 
+                <button
+                    className="absolute top-3 right-3 p-2.5 bg-slate-900/40 hover:bg-slate-900/60 backdrop-blur-md rounded-full text-white shadow-sm z-20 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-all active:scale-95 border border-white/20"
+                    onPointerDown={(e) => {
+                        e.stopPropagation();
+                        e.preventDefault(); 
+                        setPreviewPuzzle(puzzle);
+                    }}
+                    onPointerUp={(e) => {
+                        e.stopPropagation();
+                        setPreviewPuzzle(null);
+                    }}
+                    onPointerLeave={(e) => {
+                        e.stopPropagation();
+                        setPreviewPuzzle(null);
+                    }}
+                    onClick={(e) => e.stopPropagation()}
+                    aria-label="Preview"
+                >
+                    <Eye size={16} />
+                </button>
+
                 {isCompleted ? (
-                    <div className="absolute inset-0 bg-emerald-900/20 flex items-center justify-center">
-                         <div className="bg-emerald-500 text-white p-3 rounded-full shadow-lg animate-in zoom-in duration-300">
-                             <Check size={24} strokeWidth={3} />
+                    <div className="absolute inset-0 bg-emerald-900/20 flex items-center justify-center pointer-events-none">
+                         <div className="bg-emerald-500 text-white p-2.5 rounded-full shadow-lg animate-in zoom-in duration-300">
+                             <Check size={18} strokeWidth={3} />
                          </div>
                     </div>
                 ) : (
-                    <div className="absolute inset-0 bg-black/10 flex items-center justify-center">
-                        <div className="bg-white/90 p-4 rounded-full shadow-lg">
-                            <Play size={24} className="fill-indigo-600 text-indigo-600 ml-1" />
+                    <div className="absolute inset-0 bg-black/10 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none">
+                        <div className="bg-white/90 p-3 rounded-full shadow-lg scale-90 group-hover:scale-100 transition-transform">
+                            <Play size={20} className="fill-indigo-600 text-indigo-600 ml-0.5" />
                         </div>
                     </div>
                 )}
             </div>
             
-            <div className="p-5 flex flex-col gap-2">
+            <div 
+                className="p-3 flex flex-col gap-1.5"
+                onMouseEnter={() => setPreviewPuzzle(puzzle)}
+                onMouseLeave={() => setPreviewPuzzle(null)}
+            >
                 <div className="flex items-center justify-between">
-                    <span className="text-xs font-bold uppercase tracking-wider text-slate-400">{puzzle.category || 'Classic'}</span>
-                    {puzzle.difficulty && (
-                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md uppercase tracking-wide border ${
-                            puzzle.difficulty === 'easy' ? 'text-emerald-600 border-emerald-100 bg-emerald-50' :
-                            puzzle.difficulty === 'normal' ? 'text-blue-600 border-blue-100 bg-blue-50' :
-                            puzzle.difficulty === 'hard' ? 'text-orange-600 border-orange-100 bg-orange-50' :
-                            'text-rose-600 border-rose-100 bg-rose-50'
-                        }`}>
-                            {puzzle.difficulty}
-                        </span>
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 truncate max-w-[60%]">{puzzle.category || 'Classic'}</span>
+                    {thumbnails[puzzle.id] && (
+                        <div className="text-[10px] text-indigo-400 bg-indigo-50 px-1.5 py-0.5 rounded flex items-center gap-1" title="Available Offline">
+                            <WifiOff size={8} /> Saved
+                        </div>
                     )}
                 </div>
-                <h3 className="font-serif text-lg text-slate-800 leading-tight truncate" title={puzzle.title}>{puzzle.title}</h3>
+                <h3 className="font-serif text-sm font-medium text-slate-800 leading-tight truncate" title={puzzle.title}>{puzzle.title}</h3>
                 
-                <div className="flex flex-wrap gap-2 mt-1">
+                <div className="flex flex-wrap gap-1.5 mt-0.5 items-center">
+                    <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded border capitalize ${
+                        (puzzle.difficulty || 'normal') === 'easy' ? 'text-sky-600 bg-sky-50 border-sky-100' :
+                        (puzzle.difficulty || 'normal') === 'hard' ? 'text-orange-600 bg-orange-50 border-orange-100' :
+                        (puzzle.difficulty || 'normal') === 'expert' ? 'text-rose-600 bg-rose-50 border-rose-100' :
+                        'text-slate-500 bg-slate-50 border-slate-100'
+                    }`}>
+                        {puzzle.difficulty || 'normal'}
+                    </span>
                     {hasSave && (
-                       <div className="flex items-center gap-1.5 text-xs font-medium text-amber-600 bg-amber-50 px-2.5 py-1 rounded-md w-fit border border-amber-100">
-                          <History size={12} /> Resume
+                       <div className="flex items-center gap-1 text-[10px] font-medium text-amber-600 bg-amber-50 px-2 py-0.5 rounded-md w-fit border border-amber-100">
+                          <History size={10} /> Resume
                        </div>
                     )}
                     {isCompleted && (
-                       <div className="flex items-center gap-1.5 text-xs font-bold text-emerald-600 bg-emerald-50 px-2.5 py-1 rounded-md w-fit border border-emerald-100 uppercase tracking-wide">
-                          <Check size={12} strokeWidth={3} /> Solved
+                       <div className="flex items-center gap-1 text-[10px] font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-md w-fit border border-emerald-100 uppercase tracking-wide">
+                          <Check size={10} strokeWidth={3} /> Solved
                        </div>
                     )}
                 </div>
@@ -526,6 +683,38 @@ const App: React.FC = () => {
           </div>
         )})}
       </div>
+      )}
+
+      {/* Floating Preview Window (New Window Style) */}
+      {previewPuzzle && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-6 pointer-events-none md:inset-auto md:bottom-6 md:right-6 md:block md:p-0">
+              {/* Added backdrop blur for mobile focus */}
+              <div className="absolute inset-0 bg-slate-900/20 backdrop-blur-sm md:hidden animate-in fade-in duration-200"></div>
+              
+              <div className="bg-white p-3 rounded-2xl shadow-2xl border border-slate-200 animate-in fade-in zoom-in-95 duration-200 w-full max-w-xs md:w-72 ring-4 ring-black/5 mx-auto relative z-10">
+                  <div className="aspect-square rounded-xl overflow-hidden mb-3 relative bg-slate-100">
+                      <img 
+                        src={thumbnails[previewPuzzle.id] || previewPuzzle.src} 
+                        className="w-full h-full object-cover"
+                        alt="Preview"
+                      />
+                      <div className="absolute inset-0 ring-1 ring-inset ring-black/10 rounded-xl"></div>
+                  </div>
+                  <div className="text-center px-1 pb-1">
+                      <h4 className="font-serif font-bold text-slate-800 text-lg leading-tight mb-1">{previewPuzzle.title}</h4>
+                      <p className="text-xs text-slate-500 uppercase tracking-wider font-medium">{previewPuzzle.category || 'Gallery'}</p>
+                      
+                       <span className={`inline-block mt-2 text-[10px] font-medium px-2 py-0.5 rounded border capitalize ${
+                        (previewPuzzle.difficulty || 'normal') === 'easy' ? 'text-sky-600 bg-sky-50 border-sky-100' :
+                        (previewPuzzle.difficulty || 'normal') === 'hard' ? 'text-orange-600 bg-orange-50 border-orange-100' :
+                        (previewPuzzle.difficulty || 'normal') === 'expert' ? 'text-rose-600 bg-rose-50 border-rose-100' :
+                        'text-slate-500 bg-slate-50 border-slate-100'
+                    }`}>
+                        {previewPuzzle.difficulty || 'normal'}
+                    </span>
+                  </div>
+              </div>
+          </div>
       )}
     </div>
   );
@@ -657,6 +846,25 @@ const App: React.FC = () => {
         />
       )}
       {showHowToPlay && renderHowToPlay()}
+      
+      {/* Global Error Modal */}
+      {error && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-900/50 backdrop-blur-sm p-4 animate-in fade-in">
+            <div className="bg-white rounded-2xl shadow-2xl p-6 max-w-xs w-full text-center animate-in zoom-in-95 duration-200">
+                <div className="w-12 h-12 bg-rose-100 text-rose-600 rounded-full flex items-center justify-center mx-auto mb-4">
+                    <AlertTriangle size={24} />
+                </div>
+                <h3 className="text-lg font-bold text-slate-800 mb-2">{error.title}</h3>
+                <p className="text-slate-500 text-sm mb-6 leading-relaxed">{error.message}</p>
+                <button 
+                    onClick={() => setError(null)}
+                    className="w-full py-3 bg-slate-900 text-white rounded-xl font-bold hover:bg-slate-800 transition-colors"
+                >
+                    Dismiss
+                </button>
+            </div>
+        </div>
+      )}
     </div>
   );
 };

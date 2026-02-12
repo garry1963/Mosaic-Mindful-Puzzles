@@ -1,6 +1,35 @@
-import { PuzzleConfig } from "./types";
+import { PuzzleConfig, Difficulty } from "./types";
 
-export const INITIAL_PUZZLES: PuzzleConfig[] = [
+// Helper to generate consistent categorized puzzles
+const generateCategoryPuzzles = (
+  category: string, 
+  query: string, 
+  count: number, 
+  startLockId: number
+): PuzzleConfig[] => {
+  const difficulties: Difficulty[] = ['easy', 'normal', 'hard', 'expert'];
+  
+  return Array.from({ length: count }, (_, i) => {
+    // Deterministic difficulty based on index
+    const difficulty = difficulties[i % 4];
+    
+    return {
+      id: `${category.toLowerCase().replace(/\s+/g, '-')}-${i + 1}`,
+      title: `${category} Collection ${i + 1}`,
+      // Use loremflickr with lock to ensure the image is consistent for the puzzle session
+      src: `https://loremflickr.com/800/800/${query}?lock=${startLockId + i}`,
+      difficulty,
+      category
+    };
+  });
+};
+
+const CLASSIC_CARS = generateCategoryPuzzles('Classic Cars', 'classic,car', 30, 1000);
+const ANIMALS = generateCategoryPuzzles('Animals', 'wildlife,animal', 30, 2000);
+// Disney specific might be tricky with generic stock services, using terms that might evoke the style
+const DISNEY = generateCategoryPuzzles('Disney', 'castle,cartoon,fantasy,amusement', 30, 3000);
+
+const EXISTING_PUZZLES: PuzzleConfig[] = [
   // Existing & Categorized
   {
     id: 'p1',
@@ -166,6 +195,13 @@ export const INITIAL_PUZZLES: PuzzleConfig[] = [
   { id: 'w2', title: 'Frozen Lake', src: 'https://picsum.photos/id/566/800/800', difficulty: 'expert', category: 'Winter' },
   { id: 'w3', title: 'Cozy Fire', src: 'https://picsum.photos/id/571/800/800', difficulty: 'easy', category: 'Winter' },
   { id: 'w4', title: 'Ice Crystals', src: 'https://picsum.photos/id/577/800/800', difficulty: 'normal', category: 'Winter' },
+];
+
+export const INITIAL_PUZZLES: PuzzleConfig[] = [
+  ...EXISTING_PUZZLES,
+  ...CLASSIC_CARS,
+  ...ANIMALS,
+  ...DISNEY
 ];
 
 export const DIFFICULTY_SETTINGS = {
