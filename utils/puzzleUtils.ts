@@ -95,18 +95,32 @@ const generateMosaicPieces = (rows: number, cols: number, pieceWidth: number, pi
         
         const xs = [pTL.x, pTR.x, pBR.x, pBL.x];
         const ys = [pTL.y, pTR.y, pBR.y, pBL.y];
-        const minX = Math.min(...xs) - 5; // 5% padding for curves
-        const maxX = Math.max(...xs) + 5;
-        const minY = Math.min(...ys) - 5;
-        const maxY = Math.max(...ys) + 5;
+        
+        // Dynamic Padding: 35% of the piece dimension covers max jitter (25%) + curve variance
+        const paddingX = pieceWidth * 0.35;
+        const paddingY = pieceHeight * 0.35;
+
+        const minX = Math.min(...xs) - paddingX;
+        const maxX = Math.max(...xs) + paddingX;
+        const minY = Math.min(...ys) - paddingY;
+        const maxY = Math.max(...ys) + paddingY;
         
         const w = maxX - minX;
         const h = maxY - minY;
         
         // Use shuffled grid positions
         const index = r * cols + c;
-        const currentX = positions[index].x;
-        const currentY = positions[index].y;
+        
+        // Correct offset calculation:
+        // We need to apply the same bounding-box offset to the shuffled grid position
+        // that exists for the correct grid position.
+        const originalGridX = c * pieceWidth;
+        const originalGridY = r * pieceHeight;
+        const offsetX = minX - originalGridX;
+        const offsetY = minY - originalGridY;
+        
+        const currentX = positions[index].x + offsetX;
+        const currentY = positions[index].y + offsetY;
   
         const rotation = rotate ? Math.floor(Math.random() * 4) * 90 : 0;
         
