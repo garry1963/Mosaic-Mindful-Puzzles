@@ -28,6 +28,8 @@ const CLASSIC_CARS = generateCategoryPuzzles('Classic Cars', 'classic,car', 30, 
 const ANIMALS = generateCategoryPuzzles('Animals', 'wildlife,animal', 30, 2000);
 // Disney specific might be tricky with generic stock services, using terms that might evoke the style
 const DISNEY = generateCategoryPuzzles('Disney', 'castle,cartoon,fantasy,amusement', 30, 3000);
+// Updated keywords to avoid humans (removed 'cute', added 'portrait')
+const CATS = generateCategoryPuzzles('Cats', 'cat,kitten,feline,portrait', 30, 4000);
 
 const EXISTING_PUZZLES: PuzzleConfig[] = [
   // Existing & Categorized
@@ -201,6 +203,7 @@ export const INITIAL_PUZZLES: PuzzleConfig[] = [
   ...EXISTING_PUZZLES,
   ...CLASSIC_CARS,
   ...ANIMALS,
+  ...CATS,
   ...DISNEY
 ];
 

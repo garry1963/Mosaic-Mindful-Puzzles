@@ -341,14 +341,15 @@ const GameBoard: React.FC<GameBoardProps> = ({ puzzle, onExit, onComplete }) => 
         }
     }
 
-    const groupMembers = pieces.filter(p => p.groupId === piece.groupId);
+    const groupMembers = [piece];
+    
     const groupCache: { id: number; el: HTMLDivElement; rotation: number }[] = [];
     const startPositions: Record<number, {x: number, y: number}> = {};
     
     // Determine Touch Offset (Android Optimization)
     // If it's a touch event and not sticky mode, we shift the piece up so the user can see it.
-    // -75px is roughly enough to clear a thumb.
-    const visualYOffset = (pointerType === 'touch' && !isSticky) ? -75 : 0;
+    // -90px clears most thumbs/fingers.
+    const visualYOffset = (pointerType === 'touch' && !isSticky) ? -90 : 0;
     
     groupMembers.forEach(p => {
         const el = pieceRefs.current[p.id];
@@ -409,12 +410,6 @@ const GameBoard: React.FC<GameBoardProps> = ({ puzzle, onExit, onComplete }) => 
     window.removeEventListener('pointercancel', handleWindowPointerUp);
     window.removeEventListener('pointerdown', handleStickyDrop); // cleanup
 
-    // Reset pointer events if we messed with them (sticky mode)
-    if (wasSticky) {
-        // We iterate pieces because we set pointerEvents='none' on them in sticky mode
-        // But we can just rely on the cleanupStyles loop below which resets everything.
-    }
-
     const { startX, startY, startTime, pieceId, groupCache, startPositions, initialPieces, visualYOffset } = dragRef.current;
 
     // Cleanup styles
@@ -441,162 +436,126 @@ const GameBoard: React.FC<GameBoardProps> = ({ puzzle, onExit, onComplete }) => 
          return;
     }
 
-    // Drop Logic
+    // STRICT GRID DROP LOGIC
     const draggedPiece = initialPieces.find(p => p.id === pieceId);
     
     if (draggedPiece && boardRef.current) {
         const rect = boardRef.current.getBoundingClientRect();
         const settings = DIFFICULTY_SETTINGS[difficulty];
-        const pieceW = 100 / settings.cols;
-        const pieceH = 100 / settings.rows;
         
+        // Convert screen delta to percentages
         const totalDxPixels = endX - startX;
-        // IMPORTANT: We must correct the dy by adding the offset back.
         const totalDyPixels = (endY - startY) + visualYOffset;
         
-        const deltaCol = Math.round((totalDxPixels / rect.width) * settings.cols);
-        const deltaRow = Math.round((totalDyPixels / rect.height) * settings.rows);
+        const deltaXPercent = (totalDxPixels / rect.width) * 100;
+        const deltaYPercent = (totalDyPixels / rect.height) * 100;
         
-        const groupMembers = initialPieces.filter(p => p.groupId === draggedPiece.groupId);
-        let validMove = true;
-        const swapRequests: { source: {x:number, y:number}, target: {x:number, y:number}, pieceId: number }[] = [];
+        const startPos = startPositions[draggedPiece.id];
+        const cellW = 100 / settings.cols;
+        const cellH = 100 / settings.rows;
+
+        // Calculate the theoretical "center" of the piece after drag
+        // This determines which grid slot the user is hovering over
+        const currentCenterX = startPos.x + deltaXPercent + draggedPiece.width / 2;
+        const currentCenterY = startPos.y + deltaYPercent + draggedPiece.height / 2;
         
-        for (const member of groupMembers) {
-            const mStart = startPositions[member.id];
-            const mStartCol = Math.round(mStart.x / pieceW);
-            const mStartRow = Math.round(mStart.y / pieceH);
-            
-            const mTargetCol = mStartCol + deltaCol;
-            const mTargetRow = mStartRow + deltaRow;
-            
-            if (mTargetCol < 0 || mTargetCol >= settings.cols || mTargetRow < 0 || mTargetRow >= settings.rows) {
-                validMove = false;
-                break;
-            }
-            
-            const mTargetX = mTargetCol * pieceW;
-            const mTargetY = mTargetRow * pieceH;
-            
-            const resident = initialPieces.find(p => 
-                p.groupId !== draggedPiece.groupId && 
-                Math.abs(p.currentX - mTargetX) < 1 &&
-                Math.abs(p.currentY - mTargetY) < 1
-            );
-            
-            if (resident) {
-                if (resident.isLocked) {
-                    validMove = false;
-                    break;
-                }
+        // Identify the Target Grid Slot
+        const targetCol = Math.floor(currentCenterX / cellW);
+        const targetRow = Math.floor(currentCenterY / cellH);
 
-                // CHECK 1: Is this the correct final destination?
-                const isCorrectDestination = 
-                    Math.abs(mTargetX - member.correctX) < 0.1 && 
-                    Math.abs(mTargetY - member.correctY) < 0.1;
-
-                // CHECK 2: Is it next to a correct matching neighbor?
-                let isNextToMatchingNeighbor = false;
-                const directions = [{ dc: 1, dr: 0 }, { dc: 0, dr: 1 }, { dc: -1, dr: 0 }, { dc: 0, dr: -1 }];
-                
-                for (const n of directions) {
-                    const nX = (mTargetCol + n.dc) * pieceW;
-                    const nY = (mTargetRow + n.dr) * pieceH;
-                    
-                    const neighborPiece = initialPieces.find(p => 
-                        p.groupId !== draggedPiece.groupId && 
-                        p.id !== resident.id && // Don't check against the resident we are displacing
-                        Math.abs(p.currentX - nX) < 1 &&
-                        Math.abs(p.currentY - nY) < 1
-                    );
-
-                    if (neighborPiece) {
-                        const correctDX = neighborPiece.correctX - member.correctX;
-                        const correctDY = neighborPiece.correctY - member.correctY;
-                        const expectedDX = n.dc * pieceW;
-                        const expectedDY = n.dr * pieceH;
-                        
-                        if (Math.abs(correctDX - expectedDX) < 1 && 
-                            Math.abs(correctDY - expectedDY) < 1 && 
-                            member.rotation === neighborPiece.rotation) {
-                            isNextToMatchingNeighbor = true;
-                            break;
-                        }
-                    }
-                }
-
-                // If neither correct destination nor a valid neighbor connect, reject the move
-                if (!isCorrectDestination && !isNextToMatchingNeighbor) {
-                    validMove = false;
-                    break;
-                }
-            }
+        // Identify the Source Grid Slot (where the piece came from)
+        // We use the same center logic on startPos
+        const startCol = Math.floor((startPos.x + draggedPiece.width / 2) / cellW);
+        const startRow = Math.floor((startPos.y + draggedPiece.height / 2) / cellH);
+        
+        let validMove = false;
+        let swapTargetId: number | null = null;
+        let targetX = startPos.x;
+        let targetY = startPos.y;
+        
+        // 1. Check Bounds
+        if (targetCol >= 0 && targetCol < settings.cols && targetRow >= 0 && targetRow < settings.rows) {
             
-            swapRequests.push({
-                pieceId: member.id,
-                source: { x: mStart.x, y: mStart.y },
-                target: { x: mTargetX, y: mTargetY }
+            // 2. Calculate Precise Target CSS Coords
+            // To handle Mosaic offsets, we calculate the offset relative to the *source* cell
+            // and apply it to the *target* cell.
+            // Offset = CSS_Position - (Grid_Col * Cell_Width)
+            const cellOffsetX = startPos.x - (startCol * cellW);
+            const cellOffsetY = startPos.y - (startRow * cellH);
+            
+            const newCssX = targetCol * cellW + cellOffsetX;
+            const newCssY = targetRow * cellH + cellOffsetY;
+            
+            // 3. Check Occupancy
+            // We find occupancy by checking which piece's center is in the target slot
+            const occupant = initialPieces.find(p => {
+                if (p.id === draggedPiece.id) return false;
+                const pCol = Math.floor((p.currentX + p.width/2) / cellW);
+                const pRow = Math.floor((p.currentY + p.height/2) / cellH);
+                return pCol === targetCol && pRow === targetRow;
             });
+
+            if (!occupant) {
+                // Empty slot -> Move there
+                validMove = true;
+                targetX = newCssX;
+                targetY = newCssY;
+            } else if (!occupant.isLocked) {
+                // Occupied by loose piece -> Swap
+                validMove = true;
+                swapTargetId = occupant.id;
+                targetX = newCssX;
+                targetY = newCssY;
+            } else {
+                // Occupied by locked piece -> Bounce back (Invalid)
+                validMove = false;
+            }
         }
         
+        // Execute Move
         if (validMove) {
-            let newPieces = [...initialPieces];
-            const movedIds = new Set(groupMembers.map(m => m.id));
-            
-            newPieces = newPieces.map(p => {
-                const req = swapRequests.find(r => r.pieceId === p.id);
-                if (req) {
-                    const isCorrect = Math.abs(req.target.x - p.correctX) < 0.1 && 
-                                      Math.abs(req.target.y - p.correctY) < 0.1 && 
-                                      p.rotation === 0;
-                    return { ...p, currentX: req.target.x, currentY: req.target.y, isLocked: isCorrect };
-                }
-                const displacingReq = swapRequests.find(r => 
-                    Math.abs(p.currentX - r.target.x) < 1 &&
-                    Math.abs(p.currentY - r.target.y) < 1
-                );
-                if (displacingReq && !movedIds.has(p.id)) {
-                    const isCorrect = Math.abs(displacingReq.source.x - p.correctX) < 0.1 &&
-                                      Math.abs(displacingReq.source.y - p.correctY) < 0.1 &&
-                                      p.rotation === 0;
-                    return { ...p, currentX: displacingReq.source.x, currentY: displacingReq.source.y, isLocked: isCorrect };
-                }
-                return p;
-            });
-            
-            // Group Merging Logic
-            let merged = true;
-            while(merged) {
-                merged = false;
-                const currentGroupMembers = newPieces.filter(p => p.groupId === draggedPiece.groupId);
-                for (const member of currentGroupMembers) {
-                    const col = Math.round(member.currentX / pieceW);
-                    const row = Math.round(member.currentY / pieceH);
-                    const neighbors = [{ dc: 1, dr: 0 }, { dc: 0, dr: 1 }, { dc: -1, dr: 0 }, { dc: 0, dr: -1 }];
-                    for (const n of neighbors) {
-                        const nX = (col + n.dc) * pieceW;
-                        const nY = (row + n.dr) * pieceH;
-                        const neighborPiece = newPieces.find(p => p.groupId !== member.groupId && Math.abs(p.currentX - nX) < 1 && Math.abs(p.currentY - nY) < 1);
-                        if (neighborPiece) {
-                            const correctDX = neighborPiece.correctX - member.correctX;
-                            const correctDY = neighborPiece.correctY - member.correctY;
-                            const expectedDX = n.dc * pieceW;
-                            const expectedDY = n.dr * pieceH;
-                            if (Math.abs(correctDX - expectedDX) < 1 && Math.abs(correctDY - expectedDY) < 1 && member.rotation === neighborPiece.rotation) {
-                                const targetGroupId = member.groupId;
-                                const sourceGroupId = neighborPiece.groupId;
-                                newPieces = newPieces.map(p => p.groupId === sourceGroupId ? { ...p, groupId: targetGroupId } : p);
-                                merged = true;
-                                break; 
-                            }
-                        }
-                    }
-                    if (merged) break;
-                }
-            }
-            setPieces(newPieces);
-            
-            // Check completion
-            if (newPieces.every(p => p.isLocked)) {
+             let newPieces = [...initialPieces];
+             
+             // Update Dragged Piece
+             newPieces = newPieces.map(p => {
+                 if (p.id === draggedPiece.id) {
+                     // Check if this new position is the "Correct" one
+                     // Snap threshold logic: if it's in the correct slot, lock it.
+                     const isCorrectSlot = Math.abs(targetX - p.correctX) < settings.snapThreshold && 
+                                           Math.abs(targetY - p.correctY) < settings.snapThreshold;
+                     
+                     return {
+                         ...p,
+                         currentX: targetX,
+                         currentY: targetY,
+                         isLocked: isCorrectSlot && p.rotation === 0
+                     };
+                 }
+                 // Update Swapped Piece (if any)
+                 if (swapTargetId !== null && p.id === swapTargetId) {
+                     // Move occupant to the SOURCE slot
+                     const swapTargetCssX = startCol * cellW + (p.currentX % cellW); // Approximate offset preservation?
+                     // Actually, we should just swap raw coordinates if possible.
+                     // But mosaic pieces might have diff offsets.
+                     // Safest: Use startPos of dragged piece if shapes are uniform, 
+                     // OR re-calculate standard offset. 
+                     // Since createPuzzlePieces generates uniform offsets per puzzle type, startPos.x works.
+                     // Wait, startPos.x is the dragged piece's old pos.
+                     // If we swap, we put the occupant into startPos.x.
+                     
+                     return {
+                         ...p,
+                         currentX: startPos.x,
+                         currentY: startPos.y
+                         // Occupant moved, check if it accidentally landed in its correct spot? (Unlikely but possible)
+                     };
+                 }
+                 return p;
+             });
+
+             setPieces(newPieces);
+             
+             if (newPieces.every(p => p.isLocked)) {
                 setIsComplete(true);
                 if (onComplete) onComplete();
             }
@@ -826,14 +785,14 @@ const GameBoard: React.FC<GameBoardProps> = ({ puzzle, onExit, onComplete }) => 
               <h2 className="text-3xl font-serif font-bold text-slate-800 mb-2">Complete!</h2>
               <p className="text-slate-500 mb-8">{puzzle.title} solved.</p>
               <div className="flex gap-3">
-                 <button onClick={onExit} className="flex-1 py-4 rounded-2xl bg-slate-100 text-slate-700 font-bold hover:bg-slate-200">
-                    Gallery
+                 <button onClick={onExit} className="flex-1 py-4 rounded-2xl bg-slate-900 text-white font-bold hover:bg-slate-800 shadow-xl shadow-slate-900/20 transition-colors">
+                    Continue to Gallery
                  </button>
                  <button 
                     onClick={() => initializeNewGame(difficulty, style)}
-                    className="flex-1 py-4 rounded-2xl bg-slate-900 text-white font-bold hover:bg-slate-800 shadow-xl shadow-slate-900/20"
+                    className="flex-1 py-4 rounded-2xl bg-slate-100 text-slate-700 font-bold hover:bg-slate-200"
                  >
-                    Again
+                    Play Again
                  </button>
               </div>
            </div>

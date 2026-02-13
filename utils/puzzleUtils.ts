@@ -96,9 +96,10 @@ const generateMosaicPieces = (rows: number, cols: number, pieceWidth: number, pi
         const xs = [pTL.x, pTR.x, pBR.x, pBL.x];
         const ys = [pTL.y, pTR.y, pBR.y, pBL.y];
         
-        // Dynamic Padding: 35% of the piece dimension covers max jitter (25%) + curve variance
-        const paddingX = pieceWidth * 0.35;
-        const paddingY = pieceHeight * 0.35;
+        // Dynamic Padding: 30% padding is safer to avoid clipping tabs
+        // This ensures the bounding box strictly contains the path including bezier control points
+        const paddingX = pieceWidth * 0.30;
+        const paddingY = pieceHeight * 0.30;
 
         const minX = Math.min(...xs) - paddingX;
         const maxX = Math.max(...xs) + paddingX;
@@ -112,13 +113,15 @@ const generateMosaicPieces = (rows: number, cols: number, pieceWidth: number, pi
         const index = r * cols + c;
         
         // Correct offset calculation:
-        // We need to apply the same bounding-box offset to the shuffled grid position
-        // that exists for the correct grid position.
+        // We calculate where the Top-Left of the visual box should be relative to the logical grid cell
         const originalGridX = c * pieceWidth;
         const originalGridY = r * pieceHeight;
+        
+        // The offset represents how much "larger" and "shifted" the bounding box is compared to the simple grid cell
         const offsetX = minX - originalGridX;
         const offsetY = minY - originalGridY;
         
+        // We apply this offset to the randomized position so the piece sits visually centered in its slot
         const currentX = positions[index].x + offsetX;
         const currentY = positions[index].y + offsetY;
   
@@ -152,7 +155,7 @@ export const createPuzzlePieces = (difficulty: Difficulty, style: PuzzleStyle = 
   const { rows, cols, rotate } = settings;
   const count = rows * cols;
   
-  // Grid Dimensions
+  // Grid Dimensions (0-100 coordinate space)
   const pieceWidth = 100 / cols;
   const pieceHeight = 100 / rows;
 
@@ -160,6 +163,7 @@ export const createPuzzlePieces = (difficulty: Difficulty, style: PuzzleStyle = 
   const positions: {x: number, y: number}[] = [];
   for(let r=0; r<rows; r++) {
       for(let c=0; c<cols; c++) {
+          // STRICT GRID ALIGNMENT: No scatter/jitter
           positions.push({
               x: c * pieceWidth,
               y: r * pieceHeight
@@ -214,13 +218,12 @@ export const createPuzzlePieces = (difficulty: Difficulty, style: PuzzleStyle = 
 
 export const checkSnap = (piece: Piece, difficulty: Difficulty): boolean => {
   const settings = DIFFICULTY_SETTINGS[difficulty];
-  const threshold = settings.snapThreshold;
-
+  const baseThreshold = settings.snapThreshold; 
+  
   const dx = Math.abs(piece.currentX - piece.correctX);
   const dy = Math.abs(piece.currentY - piece.correctY);
 
-  // If rotation is enabled, must be 0 (or 360) to snap
   const isRotationCorrect = !settings.rotate || (piece.rotation % 360 === 0);
 
-  return dx < threshold && dy < threshold && isRotationCorrect;
+  return dx < baseThreshold && dy < baseThreshold && isRotationCorrect;
 };

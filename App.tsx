@@ -60,24 +60,24 @@ const App: React.FC = () => {
     }
   }, [generatedImages]);
 
+  // Initial History Setup
+  useEffect(() => {
+      window.history.replaceState({ view: 'home' }, '');
+  }, []);
+
   // Android Back Button Handling (History API)
   useEffect(() => {
     const handlePopState = (event: PopStateEvent) => {
-        // When hardware back button is pressed, or history.back() is called
-        if (currentView !== 'home') {
-            setCurrentView('home');
-            setSelectedPuzzle(null);
-            checkForSavedGames();
-        }
+        // Use history state to determine view, fallback to home
+        const nextView = event.state?.view || 'home';
+        setCurrentView(nextView);
+        setSelectedPuzzle(null);
+        checkForSavedGames();
     };
 
     window.addEventListener('popstate', handlePopState);
-    
-    // Set initial history state
-    window.history.replaceState({ view: 'home' }, '');
-
     return () => window.removeEventListener('popstate', handlePopState);
-  }, [currentView]);
+  }, []);
 
   // Background Scraper / Sync
   useEffect(() => {
@@ -529,7 +529,7 @@ const App: React.FC = () => {
   };
 
   const renderGallery = () => {
-    const categories = ['Classic Cars', 'Animals', 'Disney', 'Nature', 'Urban', 'Spring', 'Summer', 'Autumn', 'Winter', 'Indoor', 'Discovery'];
+    const categories = ['Classic Cars', 'Animals', 'Cats', 'Disney', 'Nature', 'Urban', 'Spring', 'Summer', 'Autumn', 'Winter', 'Indoor', 'Discovery'];
     
     const safePuzzles = Array.isArray(galleryPuzzles) ? galleryPuzzles : [];
     
@@ -659,25 +659,38 @@ const App: React.FC = () => {
                 </div>
                 <h3 className="font-serif text-sm font-medium text-slate-800 leading-tight truncate" title={puzzle.title}>{puzzle.title}</h3>
                 
-                <div className="flex flex-wrap gap-1.5 mt-0.5 items-center">
-                    <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded border capitalize ${
-                        (puzzle.difficulty || 'normal') === 'easy' ? 'text-sky-600 bg-sky-50 border-sky-100' :
-                        (puzzle.difficulty || 'normal') === 'hard' ? 'text-orange-600 bg-orange-50 border-orange-100' :
-                        (puzzle.difficulty || 'normal') === 'expert' ? 'text-rose-600 bg-rose-50 border-rose-100' :
-                        'text-slate-500 bg-slate-50 border-slate-100'
-                    }`}>
-                        {puzzle.difficulty || 'normal'}
-                    </span>
-                    {hasSave && (
-                       <div className="flex items-center gap-1 text-[10px] font-medium text-amber-600 bg-amber-50 px-2 py-0.5 rounded-md w-fit border border-amber-100">
-                          <History size={10} /> Resume
-                       </div>
-                    )}
-                    {isCompleted && (
-                       <div className="flex items-center gap-1 text-[10px] font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-md w-fit border border-emerald-100 uppercase tracking-wide">
-                          <Check size={10} strokeWidth={3} /> Solved
-                       </div>
-                    )}
+                <div className="flex items-center justify-between mt-0.5">
+                    <div className="flex flex-wrap gap-1.5 items-center">
+                        <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded border capitalize ${
+                            (puzzle.difficulty || 'normal') === 'easy' ? 'text-sky-600 bg-sky-50 border-sky-100' :
+                            (puzzle.difficulty || 'normal') === 'hard' ? 'text-orange-600 bg-orange-50 border-orange-100' :
+                            (puzzle.difficulty || 'normal') === 'expert' ? 'text-rose-600 bg-rose-50 border-rose-100' :
+                            'text-slate-500 bg-slate-50 border-slate-100'
+                        }`}>
+                            {puzzle.difficulty || 'normal'}
+                        </span>
+                        {hasSave && (
+                        <div className="flex items-center gap-1 text-[10px] font-medium text-amber-600 bg-amber-50 px-2 py-0.5 rounded-md w-fit border border-amber-100">
+                            <History size={10} /> Resume
+                        </div>
+                        )}
+                        {isCompleted && (
+                        <div className="flex items-center gap-1 text-[10px] font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-md w-fit border border-emerald-100 uppercase tracking-wide">
+                            <Check size={10} strokeWidth={3} /> Solved
+                        </div>
+                        )}
+                    </div>
+
+                    <button 
+                        onClick={(e) => {
+                            e.stopPropagation();
+                            setPreviewPuzzle(puzzle);
+                        }}
+                        className="p-1.5 -mr-1 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors active:scale-95 active:bg-indigo-100 md:hidden"
+                        aria-label="Preview Image"
+                    >
+                        <Eye size={16} />
+                    </button>
                 </div>
             </div>
           </div>
@@ -687,11 +700,25 @@ const App: React.FC = () => {
 
       {/* Floating Preview Window (New Window Style) */}
       {previewPuzzle && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-6 pointer-events-none md:inset-auto md:bottom-6 md:right-6 md:block md:p-0">
+          <div 
+            className="fixed inset-0 z-50 flex items-center justify-center p-6 md:inset-auto md:bottom-6 md:right-6 md:block md:p-0"
+            style={{ pointerEvents: 'auto' }}
+            onClick={() => setPreviewPuzzle(null)} // Click outside closes on mobile
+          >
               {/* Added backdrop blur for mobile focus */}
               <div className="absolute inset-0 bg-slate-900/20 backdrop-blur-sm md:hidden animate-in fade-in duration-200"></div>
               
-              <div className="bg-white p-3 rounded-2xl shadow-2xl border border-slate-200 animate-in fade-in zoom-in-95 duration-200 w-full max-w-xs md:w-72 ring-4 ring-black/5 mx-auto relative z-10">
+              <div 
+                className="bg-white p-3 rounded-2xl shadow-2xl border border-slate-200 animate-in fade-in zoom-in-95 duration-200 w-full max-w-xs md:w-72 ring-4 ring-black/5 mx-auto relative z-10 md:pointer-events-auto"
+                onClick={(e) => e.stopPropagation()} // Prevent close when clicking content
+              >
+                  <button 
+                     className="absolute -top-3 -right-3 bg-slate-900 text-white rounded-full p-2 shadow-lg md:hidden z-20"
+                     onClick={() => setPreviewPuzzle(null)}
+                  >
+                     <X size={16} />
+                  </button>
+
                   <div className="aspect-square rounded-xl overflow-hidden mb-3 relative bg-slate-100">
                       <img 
                         src={thumbnails[previewPuzzle.id] || previewPuzzle.src} 
