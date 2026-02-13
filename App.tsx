@@ -529,7 +529,8 @@ const App: React.FC = () => {
   };
 
   const renderGallery = () => {
-    const categories = ['Classic Cars', 'Animals', 'Cats', 'Disney Characters', 'Historical Buildings', 'People', 'Abstract', 'Nature', 'Urban', 'Spring', 'Summer', 'Autumn', 'Winter', 'Indoor', 'Discovery'];
+    // Added new categories to the list
+    const categories = ['Classic Cars', 'Animals', 'Cats', 'Disney Characters', 'Historical Buildings', 'People', 'Abstract', 'Nature', 'Urban', 'Spring', 'Summer', 'Autumn', 'Winter', 'Indoor', 'Fine Art & Masterpieces', 'Icons & Logos', 'Movies & TV Shows', 'Album Covers', 'Abstract & Colour Gradients', 'Discovery'];
     
     const safePuzzles = Array.isArray(galleryPuzzles) ? galleryPuzzles : [];
     

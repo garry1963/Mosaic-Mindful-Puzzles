@@ -56,6 +56,10 @@ const PuzzlePieceLayer = memo(({
         <>
             {pieces.map((piece) => {
                 const isHintTarget = piece.id === hintPieceId;
+                // Seamless logic: Scale locked pieces slightly to overlap gaps (1.005 = 0.5% larger)
+                // Remove scaling if piece is being dragged or rotated (handled by style props in logic)
+                const scale = isHintTarget ? 'scale(1.1)' : (piece.isLocked ? 'scale(1.005)' : 'scale(1)');
+                
                 return (
                 <div
                     key={piece.id}
@@ -73,7 +77,7 @@ const PuzzlePieceLayer = memo(({
                         left: `${piece.currentX}%`,
                         top: `${piece.currentY}%`,
                         // Initial transform only. Drag updates happen via direct DOM manipulation for 60fps
-                        transform: `rotate(${piece.rotation}deg) ${isHintTarget ? 'scale(1.1)' : ''}`,
+                        transform: `rotate(${piece.rotation}deg) ${scale}`,
                         zIndex: piece.isLocked ? 1 : (isHintTarget ? 40 : 10),
                         opacity: showPreview ? 0 : 1,
                         // Optimize painting
@@ -97,13 +101,13 @@ const PuzzlePieceLayer = memo(({
                                 backgroundSize: `${(100 * 100 / piece.width)}% ${(100 * 100 / piece.height)}%`,
                                 backgroundPosition: `${piece.bgX}% ${piece.bgY}%`,
                                 border: isHintTarget ? '3px solid #facc15' : (piece.isLocked ? 'none' : '1px solid rgba(255,255,255,0.6)'),
-                                // Use performant box-shadow instead of filters
+                                // Remove box-shadow and border-radius when locked for seamless join
                                 boxShadow: piece.isLocked ? 'none' : '0 4px 6px rgba(0,0,0,0.15), 0 1px 3px rgba(0,0,0,0.1)',
-                                borderRadius: '3px',
+                                borderRadius: piece.isLocked ? '0' : '3px',
                                 WebkitTouchCallout: 'none'
                             }}
                         >
-                             {/* Highlight/Sheen effect */}
+                             {/* Highlight/Sheen effect only on loose pieces */}
                              {!piece.isLocked && (
                                 <div className="absolute inset-0 border-[0.5px] border-white/40 rounded-sm pointer-events-none"></div>
                              )}
@@ -534,20 +538,11 @@ const GameBoard: React.FC<GameBoardProps> = ({ puzzle, onExit, onComplete }) => 
                  // Update Swapped Piece (if any)
                  if (swapTargetId !== null && p.id === swapTargetId) {
                      // Move occupant to the SOURCE slot
-                     const swapTargetCssX = startCol * cellW + (p.currentX % cellW); // Approximate offset preservation?
-                     // Actually, we should just swap raw coordinates if possible.
-                     // But mosaic pieces might have diff offsets.
-                     // Safest: Use startPos of dragged piece if shapes are uniform, 
-                     // OR re-calculate standard offset. 
-                     // Since createPuzzlePieces generates uniform offsets per puzzle type, startPos.x works.
-                     // Wait, startPos.x is the dragged piece's old pos.
-                     // If we swap, we put the occupant into startPos.x.
-                     
+                     // For uniform shapes, returning to startPos.x works.
                      return {
                          ...p,
                          currentX: startPos.x,
                          currentY: startPos.y
-                         // Occupant moved, check if it accidentally landed in its correct spot? (Unlikely but possible)
                      };
                  }
                  return p;
@@ -667,8 +662,15 @@ const GameBoard: React.FC<GameBoardProps> = ({ puzzle, onExit, onComplete }) => 
           }}
           onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); }}
         >
+            {/* Full Image Overlay on Complete (Seamless View) */}
+            {isComplete && (
+                <div className="absolute inset-0 z-40 animate-in fade-in duration-1000">
+                    <img src={puzzle.src} className="w-full h-full object-cover rounded-lg" alt="Completed Puzzle" />
+                </div>
+            )}
+
             {/* Grid Lines */}
-            {style === 'classic' && (
+            {style === 'classic' && !isComplete && (
                 <div 
                     className="absolute inset-0 pointer-events-none opacity-10"
                     style={{
@@ -682,13 +684,15 @@ const GameBoard: React.FC<GameBoardProps> = ({ puzzle, onExit, onComplete }) => 
             )}
 
             {/* Ghost Image (Low Opacity Guide) */}
-            <div 
-                className="absolute inset-0 pointer-events-none opacity-5 grayscale"
-                style={{
-                    backgroundImage: `url(${puzzle.src})`,
-                    backgroundSize: 'cover'
-                }}
-            />
+            {!isComplete && (
+                <div 
+                    className="absolute inset-0 pointer-events-none opacity-5 grayscale"
+                    style={{
+                        backgroundImage: `url(${puzzle.src})`,
+                        backgroundSize: 'cover'
+                    }}
+                />
+            )}
 
             {/* Hint Ghost */}
             {activeHintPiece && (
@@ -705,7 +709,7 @@ const GameBoard: React.FC<GameBoardProps> = ({ puzzle, onExit, onComplete }) => 
             )}
 
             {/* Pieces Layer */}
-            {isLoaded && (
+            {isLoaded && !isComplete && (
                 <PuzzlePieceLayer 
                     pieces={pieces}
                     puzzleSrc={puzzle.src}
@@ -718,7 +722,7 @@ const GameBoard: React.FC<GameBoardProps> = ({ puzzle, onExit, onComplete }) => 
                 />
             )}
 
-            {/* Full Preview Overlay */}
+            {/* Full Preview Overlay (Peek) */}
             <div 
                 className={`absolute inset-0 z-50 transition-all duration-300 pointer-events-none origin-center ${showPreview ? 'opacity-100 scale-100' : 'opacity-0 scale-95'}`}
                 style={{ visibility: showPreview ? 'visible' : 'hidden' }}
@@ -729,6 +733,7 @@ const GameBoard: React.FC<GameBoardProps> = ({ puzzle, onExit, onComplete }) => 
       </div>
 
       {/* 3. Bottom Control Dock (Thumb Zone) */}
+      {!isComplete && (
       <div className="h-auto px-6 flex items-center justify-center gap-6 z-40 pointer-events-none pb-safe-bottom">
          <div className="pointer-events-auto flex items-center gap-3 bg-white/90 backdrop-blur-xl p-3 rounded-3xl shadow-2xl border border-white/40 ring-1 ring-black/5">
              
@@ -774,25 +779,28 @@ const GameBoard: React.FC<GameBoardProps> = ({ puzzle, onExit, onComplete }) => 
              </button>
          </div>
       </div>
+      )}
 
-      {/* Completion Modal */}
+      {/* Completion Overlay (Bottom) */}
       {isComplete && (
-        <div className="absolute inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-md animate-in fade-in duration-500 p-6">
-           <div className="bg-white p-8 rounded-[2.5rem] shadow-2xl max-w-sm w-full text-center animate-in zoom-in-95 duration-300">
-              <div className="w-20 h-20 bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center mx-auto mb-6">
-                 <Check size={40} strokeWidth={4} />
+        <div className="absolute inset-x-0 bottom-0 z-50 flex flex-col items-center justify-end pb-8 bg-gradient-to-t from-black/80 via-transparent to-transparent animate-in fade-in duration-1000 pointer-events-none pb-safe-bottom">
+           <div className="bg-white/90 backdrop-blur-md p-6 rounded-3xl shadow-2xl max-w-sm w-full text-center mx-4 mb-4 pointer-events-auto border border-white/50">
+              <div className="w-16 h-16 bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center mx-auto mb-4 shadow-inner">
+                 <Check size={32} strokeWidth={4} />
               </div>
-              <h2 className="text-3xl font-serif font-bold text-slate-800 mb-2">Complete!</h2>
-              <p className="text-slate-500 mb-8">{puzzle.title} solved.</p>
+              <h2 className="text-2xl font-serif font-bold text-slate-800 mb-1">Masterpiece Complete!</h2>
+              <p className="text-slate-600 text-sm mb-6">Enjoy the view or tap the Home button to exit.</p>
+              
               <div className="flex gap-3">
-                 <button onClick={onExit} className="flex-1 py-4 rounded-2xl bg-slate-900 text-white font-bold hover:bg-slate-800 shadow-xl shadow-slate-900/20 transition-colors">
-                    Continue to Gallery
-                 </button>
-                 <button 
+                  <button 
                     onClick={() => initializeNewGame(difficulty, style)}
-                    className="flex-1 py-4 rounded-2xl bg-slate-100 text-slate-700 font-bold hover:bg-slate-200"
+                    className="flex-1 py-3 rounded-2xl bg-slate-100 text-slate-700 font-bold hover:bg-slate-200 transition-colors"
                  >
                     Play Again
+                 </button>
+                 {/* The request asked to wait for home button, but offering a gallery button is still good UX, just not auto-redirecting */}
+                 <button onClick={onExit} className="flex-1 py-3 rounded-2xl bg-slate-900 text-white font-bold hover:bg-slate-800 shadow-lg shadow-slate-900/20 transition-colors">
+                    Gallery
                  </button>
               </div>
            </div>

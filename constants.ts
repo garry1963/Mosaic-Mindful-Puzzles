@@ -1,36 +1,65 @@
 import { PuzzleConfig, Difficulty } from "./types";
 
 // ----------------------------------------------------------------------
-// KEYWORD COLLECTIONS (30 unique terms per category for variety)
+// KEYWORD COLLECTIONS (30 unique terms per category)
 // ----------------------------------------------------------------------
 
-const CLASSIC_CARS_KEYS = "vintage car,classic car,muscle car,sports car,antique car,retro dashboard,chrome bumper,headlight,convertible,mustang,corvette,ferrari classic,porsche classic,vw beetle,camper van,hot rod,sedan,coupe,roadster,luxury car,steering wheel,engine,rims,hood ornament,tail light,grille,leather seat,speedometer,car show,rust car";
+// 1. Classic Cars
+const CLASSIC_CARS_KEYS = "vintage car,classic mustang,classic corvette,ferrari 250 gto,porsche 911 classic,vw beetle vintage,vw camper van,hot rod car,shelby cobra,aston martin db5,jaguar e-type,mercedes 300sl,chevrolet bel air,cadillac eldorado,ford thunderbird,dodge charger classic,plymouth barracuda,pontiac gto,buick riviera,lincoln continental,old car dashboard,chrome bumper classic,whitewall tires,antique steering wheel,hood ornament vintage,classic car grill,leather car interior,spoked wheels car,retro speedometer,convertible classic";
 
-const ANIMALS_KEYS = "lion,tiger,bear,elephant,giraffe,zebra,monkey,gorilla,wolf,fox,deer,moose,racoon,squirrel,rabbit,eagle,owl,parrot,penguin,dolphin,whale,shark,turtle,frog,snake,lizard,butterfly,bee,horse,cow";
+// 2. Animals
+const ANIMALS_KEYS = "lion portrait,tiger prowling,grizzly bear,african elephant,giraffe savanna,zebra stripes,chimpanzee,mountain wolf,red fox,fallow deer,bull moose,racoon close up,red squirrel,cotton tail rabbit,bald eagle flying,snowy owl,macaw parrot,emperor penguin,bottlenose dolphin,humpback whale,great white shark,sea turtle,tree frog,green python,chameleon,monarch butterfly,honey bee flower,wild horse running,highland cow,polar bear";
 
-const DISNEY_KEYS = "mickey mouse,minnie mouse,donald duck,goofy,pluto,cinderella,snow white,ariel mermaid,belle beauty beast,jasmine aladdin,rapunzel tangled,elsa frozen,anna frozen,moana,tiana frog,merida brave,tinkerbell,peter pan,captain hook,alice wonderland,mad hatter,winnie pooh,tigger,stitch lilo,woody toy story,buzz lightyear,finding nemo,dory fish,monsters inc,lightning mcqueen";
+// 3. Disney Characters (Refined for Art/Illustration)
+const DISNEY_KEYS = "mickey mouse illustration,minnie mouse cartoon,donald duck art,goofy character,pluto dog disney,cinderella princess,snow white art,ariel little mermaid,belle beauty beast,jasmine aladdin,rapunzel tangled,elsa frozen art,anna frozen art,moana disney,tiana princess frog,merida brave,tinkerbell fairy,peter pan flying,captain hook art,alice in wonderland,mad hatter art,winnie the pooh art,tigger character,stitch lilo art,woody toy story,buzz lightyear art,nemo clownfish,dory finding nemo,mike wazowski,lightning mcqueen";
 
-const CATS_KEYS = "tabby cat,siamese cat,persian cat,maine coon,black cat,white cat,orange cat,calico cat,sleeping cat,playing kitten,cat eyes,cat paw,whiskers,funny cat,grumpy cat,cat portrait,fluffy cat,hairless cat,bengal cat,ragdoll cat,british shorthair,scottish fold,sphynx cat,siberian cat,burmese cat,russian blue,savannah cat,norwegian forest cat,cute kitten,cat stretching";
+// 4. Cats
+const CATS_KEYS = "tabby cat face,siamese cat,persian cat fluffy,maine coon cat,black cat halloween,white cat blue eyes,orange tabby cat,calico cat,sleeping cat cozy,playful kitten,cat green eyes,cat paws macro,cat whiskers,funny cat face,grumpy cat,cat portrait studio,fluffy kitten,sphynx cat,bengal cat spots,ragdoll cat,british shorthair,scottish fold cat,siberian cat,burmese cat,russian blue cat,savannah cat,norwegian forest cat,cute kitten basket,cat stretching,ginger cat";
 
-const HISTORICAL_KEYS = "castle,palace,cathedral,temple,pyramid,colosseum,parthenon,taj mahal,great wall china,eiffel tower,big ben,statue liberty,machu picchu,petra jordan,angkor wat,acropolis,stonehenge,leaning tower pisa,hagia sophia,notre dame,versailles,neuschwanstein,himeji castle,forbidden city,kremlin,st basils,pantheon rome,mount rushmore,golden gate bridge,brooklyn bridge";
+// 5. Historical Buildings
+const HISTORICAL_KEYS = "neuschwanstein castle,buckingham palace,notre dame cathedral,ancient greek temple,egypt pyramids giza,roman colosseum,parthenon athens,taj mahal india,great wall china,eiffel tower paris,big ben london,statue of liberty,machu picchu peru,petra jordan treasury,angkor wat cambodia,acropolis athens,stonehenge uk,leaning tower pisa,hagia sophia istanbul,versailles palace,himeji castle japan,forbidden city beijing,kremlin moscow,st basils cathedral,pantheon rome,mount rushmore,golden gate bridge,brooklyn bridge historic,sydney opera house,petronas towers";
 
-const PEOPLE_KEYS = "portrait woman,portrait man,happy child,elderly smiling,diverse group,fashion model,street portrait,candid laughing,musician playing,artist painting,dancer ballet,athlete running,doctor,chef cooking,business person,student studying,teacher,mother baby,father son,couple hugging,friends selfie,traveler,hiker,yoga pose,meditation,reading book,drinking coffee,playing guitar,holding flowers,wearing hat";
+// 6. People
+const PEOPLE_KEYS = "portrait young woman,portrait old man,happy child smiling,elderly woman smiling,diverse group people,fashion model outdoor,street photography portrait,candid laughter,musician playing guitar,artist painting canvas,ballet dancer,runner athlete,doctor portrait,chef cooking food,business woman city,student studying library,teacher classroom,mother holding baby,father and son,couple hugging sunset,friends selfie,backpacker traveler,hiker mountain top,yoga woman beach,meditation pose,woman reading book,drinking coffee cafe,man playing piano,girl holding flowers,man wearing hat";
 
-const ABSTRACT_KEYS = "abstract art,fractal,geometric pattern,colorful fluid,bokeh lights,macro texture,paint splash,ink water,smoke swirls,fire flame,glitch art,low poly,wireframe,neon lights,holographic,iridescent,metallic,wood grain,marble,crystal,diamond,glass prism,kaleidoscope,mandala,zen circles,minimalist,gradient,vaporwave,synthwave,fluid acrylic";
+// 7. Abstract
+const ABSTRACT_KEYS = "abstract fluid art,fractal geometry,geometric pattern colorful,bokeh lights abstract,macro texture art,paint splash explosion,ink in water swirl,smoke swirls color,fire flame abstract,glitch art digital,low poly landscape,wireframe mesh,neon lights abstract,holographic texture,iridescent surface,liquid metal abstract,wood grain macro,marble texture,crystal macro,diamond refraction,glass prism rainbow,kaleidoscope pattern,mandala art,zen stone circles,minimalist abstract,gradient color background,vaporwave aesthetic,synthwave grid,acrylic pour painting,oil paint texture";
 
-const NATURE_KEYS = "mountain peak,forest path,waterfall,lake reflection,sunset beach,desert dunes,snowy mountain,autumn forest,spring meadow,flower field,tropical island,canyon,river stream,thunderstorm,rainbow,starry night,northern lights,volcano,coral reef,jungle,bamboo forest,cave,glacier,cliff edge,wheat field,cherry blossom,palm tree,cactus,mossy rock,ocean wave";
+// 8. Nature
+const NATURE_KEYS = "mountain peak snow,forest path sunlight,waterfall jungle,lake reflection mountain,sunset beach tropical,desert sand dunes,snowy mountain range,autumn forest road,spring meadow flowers,sunflower field,tropical island aerial,grand canyon,river stream stones,thunderstorm lightning,double rainbow,starry night sky,northern lights aurora,volcano eruption,coral reef fish,rainforest jungle,bamboo forest japan,limestone cave,glacier ice,cliff ocean view,wheat field golden,cherry blossom tree,palm tree sunset,saguaro cactus sunset,mossy rock river,ocean wave crashing";
 
-const URBAN_KEYS = "city skyline,skyscraper,street lights,neon sign,busy intersection,subway station,graffiti art,bridge night,taxi cab,bus stop,rooftop view,alleyway,brick wall,concrete texture,glass building,urban park,street food,traffic trails,bicycle,scooter,pedestrian crossing,city rain,lamppost,fire escape,storefront,market stall,construction site,crane,train track,harbor";
+// 9. Urban
+const URBAN_KEYS = "city skyline night,skyscraper low angle,street lights rain,neon sign city,busy intersection tokyo,subway station empty,graffiti street art,bridge at night,yellow taxi cab,bus stop rain,rooftop city view,narrow alleyway,brick wall texture,concrete architecture,glass building reflection,urban park bench,street food stall,traffic light trails,bicycle city street,vespa scooter,pedestrian crossing,rainy city street,vintage lamppost,fire escape stairs,storefront window,market stall fruit,construction crane,train tracks urban,harbor crane,city skyline day";
 
-const SPRING_KEYS = "spring flowers,tulips,daffodils,cherry blossom,green grass,baby animals,easter eggs,butterfly,rain boots,rainbow,sprout,garden,blooming tree,nest eggs,bird singing,bee flower,ladybug,picnic,kite flying,umbrella,dew drops,sunbeam,fresh fruit,vegetable garden,watering can,wheelbarrow,fence,park bench,bicycle basket,spring cleaning";
+// 10. Spring
+const SPRING_KEYS = "spring tulips,daffodils yellow,cherry blossom branch,green grass dew,baby lamb,easter eggs basket,monarch butterfly flower,rain boots puddle,spring rainbow,seedling sprout,garden blooming,blooming apple tree,bird nest eggs,robin singing,honey bee blossom,ladybug leaf,picnic basket grass,kite flying blue sky,colorful umbrella rain,morning dew drops,sunbeam forest,fresh strawberries,vegetable garden spring,watering can vintage,wheelbarrow flowers,white picket fence,park bench spring,bicycle flower basket,spring cleaning,crocus flower";
 
-const SUMMER_KEYS = "summer beach,ice cream,sunglasses,swimming pool,palm tree,sand castle,surfboard,beach ball,flip flops,sun hat,lemonade,bbq grill,camping tent,campfire,fireworks,watermelon,pineapple,coconut,cocktail,sailboat,jetski,lifeguard tower,seagull,seashell,starfish,crab,jellyfish,sunflower,picnic blanket,road trip";
+// 11. Summer
+const SUMMER_KEYS = "summer beach umbrella,ice cream cone,sunglasses beach,swimming pool blue,palm tree coconut,sand castle beach,surfboard ocean,beach ball sand,flip flops sand,sun hat straw,lemonade pitcher,bbq grill party,camping tent forest,campfire night,fireworks display,watermelon slice,pineapple fruit,coconut drink,cocktail umbrella,sailboat ocean,jetski water,lifeguard tower,seagull flying,seashells sand,starfish beach,crab beach,jellyfish underwater,sunflower close up,picnic blanket park,convertible car road trip";
 
-const AUTUMN_KEYS = "autumn leaves,pumpkin,halloween,thanksgiving,acorn,pinecone,mushroom,forest fog,rainy window,umbrella,boots,scarf,sweater,fireplace,hot chocolate,apple pie,corn field,scarecrow,hay bale,tractor,barn,harvest,orange tree,red maple,yellow aspen,fallen leaves,park bench,squirrel nut,owl tree,full moon";
+// 12. Autumn
+const AUTUMN_KEYS = "autumn leaves red,pumpkin patch,halloween pumpkin,thanksgiving table,acorn oak leaf,pinecone macro,mushroom forest,foggy forest autumn,rainy window autumn,umbrella leaves,rain boots mud,knitted scarf,cozy sweater,fireplace wood,hot chocolate mug,apple pie fresh,corn field harvest,scarecrow field,hay bale farm,tractor harvest,red barn autumn,harvest basket,orange maple tree,yellow aspen tree,fallen leaves path,park bench autumn,squirrel holding nut,owl in tree,full moon halloween,cinnamon sticks";
 
-const WINTER_KEYS = "winter snow,snowflake,snowman,ice cycle,frozen lake,skiing,snowboarding,sledding,fireplace,hot cocoa,christmas tree,gifts,reindeer,santa,ornament,wreath,lights,candle,sweater,mittens,scarf,hat,boots,cabin snow,pine tree,cardinal bird,polar bear,penguin,husky dog,aurora borealis";
+// 13. Winter
+const WINTER_KEYS = "winter snow landscape,snowflake macro,snowman scarf,icicles roof,frozen lake skating,skier mountain,snowboarder jump,sledding hill,fireplace cozy,hot cocoa marshmallows,christmas tree lights,gift box ribbon,reindeer snow,santa claus art,christmas ornament,holiday wreath,string lights bokeh,candle light,knitted sweater texture,wool mittens,winter scarf,beanie hat,winter cabin snow,pine tree snow,cardinal bird snow,polar bear snow,penguin ice,husky dog snow,aurora borealis winter,frosted window";
 
-const INDOOR_KEYS = "cozy living room,modern kitchen,luxury bedroom,home library,reading nook,coffee shop,restaurant,hotel lobby,hallway,staircase,window view,sofa,armchair,dining table,chandelier,bookshelf,house plant,desk setup,gaming room,loft,apartment,fireplace,bathroom spa,walk in closet,wine cellar,attic,sunroom,conservatory,garage,basement";
+// 14. Indoor
+const INDOOR_KEYS = "cozy living room fireplace,modern kitchen white,luxury bedroom hotel,home library books,reading nook window,coffee shop interior,restaurant table setting,hotel lobby luxury,hallway architecture,spiral staircase,window view city,velvet sofa,leather armchair,dining table set,crystal chandelier,bookshelf full,house plant monstera,desk setup computer,gaming room neon,loft apartment,studio apartment,fireplace mantle,bathroom spa tub,walk in closet,wine cellar bottles,attic room,sunroom plants,conservatory glass,garage workshop,basement man cave";
+
+// 15. Fine Art & Masterpieces (Specific Artworks)
+const FINE_ART_KEYS = "starry night van gogh painting,mona lisa da vinci painting,the scream munch painting,girl with a pearl earring painting,birth of venus botticelli painting,great wave hokusai print,the kiss gustav klimt painting,persistence of memory dali painting,last supper da vinci painting,creation of adam michelangelo fresco,night watch rembrandt painting,school of athens raphael fresco,guernica picasso painting,american gothic grant wood painting,son of man magritte painting,wanderer above the sea of fog painting,garden of earthly delights bosch painting,liberty leading the people painting,raft of the medusa painting,water lilies monet painting,sunflowers van gogh painting,cafe terrace at night van gogh,composition 8 kandinsky,yellow red blue kandinsky,convergence jackson pollock,shot marilyn warhol,campbell soup cans warhol,swans reflecting elephants dali,treachery of images magritte,frida kahlo self portrait";
+
+// 16. Icons & Logos (Brand/Symbol specific)
+const ICONS_KEYS = "apple inc logo,nike swoosh logo,coca cola trademark,pepsi logo brand,mcdonalds golden arches,starbucks coffee logo,mercedes benz emblem,ferrari prancing horse logo,batman bat symbol,superman s shield,mickey mouse silhouette icon,nasa insignia,google g logo,amazon smile logo,lego red logo,playstation symbols,xbox logo sphere,nintendo mario face icon,spotify green icon,instagram camera logo,youtube play button logo,twitter bird icon blue,facebook f logo,android robot icon,windows os logo,intel inside logo,ibm blue logo,general electric logo,shell oil pecten,target store bullseye";
+
+// 17. Movies & TV Shows (Specific Scenes/Characters)
+const MOVIES_KEYS = "star wars darth vader scene,harry potter hogwarts movie,lord of the rings gandalf scene,iron man marvel movie,batman dark knight movie,joker movie scene,spiderman movie action,jurassic park t-rex scene,lion king simba movie,frozen elsa disney movie,toy story buzz woody,shrek movie scene,pirates caribbean jack sparrow,matrix neo bullet time,avatar movie pandora,titanic movie ship bow,godfather movie scene,pulp fiction movie scene,fight club movie scene,forrest gump bench scene,gladiator russell crowe scene,stranger things tv show,game of thrones dragon scene,breaking bad heisenberg tv,friends tv show central perk,simpsons cartoon family,mandalorian baby yoda scene,james bond 007 movie,indiana jones movie scene,back to the future delorean";
+
+// 18. Album Covers (Specific Albums)
+const ALBUMS_KEYS = "pink floyd dark side moon album,beatles abbey road album cover,nirvana nevermind album cover,david bowie aladdin sane album,queen bohemian rhapsody album,rolling stones sticky fingers album,led zeppelin i album cover,michael jackson thriller album,prince purple rain album,madonna true blue album,elvis presley debut album,bob marley legend album,jimi hendrix are you experienced,daft punk random access memories,gorillaz demon days album,adele 21 album cover,taylor swift 1989 album,beyonce lemonade album,drake scorpion album cover,kanye west graduation album,eminem the eminem show album,tupac all eyez on me album,metallica master of puppets album,acdc back in black album,guns n roses appetite for destruction,iron maiden number of the beast,coldplay parachutes album,radiohead ok computer album,u2 joshua tree album,fleetwood mac rumours album";
+
+// 19. Abstract & Colour Gradients (Textures/Colors)
+const GRADIENTS_KEYS = "abstract rainbow gradient,holographic foil texture,neon gradient background,pastel gradient wallpaper,sunset color palette abstract,aurora borealis abstract,fluid acrylic paint swirl,ink in water macro abstract,kaleidoscope pattern colorful,prism light refraction abstract,stained glass texture abstract,mosaic tile pattern colorful,pixel art gradient abstract,glitch art texture abstract,vaporwave aesthetic gradient,synthwave sunset grid,cyberpunk neon city abstract,bokeh colorful lights abstract,macro oil and water abstract,iridescent pearl texture,fractal gradient art,geometric color pattern abstract,polygonal art gradient,abstract fluid art vibrant,vibrant color swirl abstract,chromatic aberration abstract,heat map gradient abstract,color spectrum wheel abstract,paint splash close up abstract,liquid metal gradient abstract";
 
 // ----------------------------------------------------------------------
 // GENERATOR FUNCTION
@@ -49,23 +78,26 @@ const generateCategoryPuzzles = (
     // Deterministic difficulty based on index
     const difficulty = difficulties[i % 4];
     
-    // Rotate through keywords to guarantee variety
+    // Rotate through keywords. We expect exactly 30 unique keywords per category.
+    // If fewer are provided, we loop, but uniqueness depends on the lock.
+    // The lists above provide 30 unique terms to ensure 30 unique images.
     const keyword = keywords[i % keywords.length];
     
-    // Capitalize for title
-    const titleKeyword = keyword.split(' ')
-      .map(w => w.charAt(0).toUpperCase() + w.slice(1))
-      .join(' ');
+    // Capitalize for title (clean up extra descriptors for display)
+    // E.g. "starry night van gogh painting" -> "Starry Night Van Gogh" (simplified logic)
+    const title = keyword.split(' ').slice(0, 3).map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
 
-    // Use comma separation for URL search to increase hit rate on LoremFlickr
+    // STRICTER URL GENERATION:
+    // 1. Replace spaces with commas
+    // 2. Append '/all' to LoremFlickr URL to enforce "Match ALL keywords"
+    // 3. Use v3 ID to bust cache.
     const urlKeyword = keyword.replace(/\s+/g, ',');
 
     return {
-      // Added '-v2' to ID to invalidate previous duplicate cache
-      id: `${category.toLowerCase().replace(/\s+/g, '-')}-v2-${i + 1}`,
-      title: `${titleKeyword}`,
-      // Use both keyword AND lock to ensure stability and uniqueness
-      src: `https://loremflickr.com/800/800/${urlKeyword}?lock=${startLockId + i}`,
+      id: `${category.toLowerCase().replace(/\s+/g, '-')}-v3-${i + 1}`,
+      title: title,
+      // The '/all' suffix ensures relevance by requiring all tags to match.
+      src: `https://loremflickr.com/800/800/${urlKeyword}/all?lock=${startLockId + i}`,
       difficulty,
       category
     };
@@ -92,6 +124,12 @@ const AUTUMN = generateCategoryPuzzles('Autumn', AUTUMN_KEYS, 30, 12000);
 const WINTER = generateCategoryPuzzles('Winter', WINTER_KEYS, 30, 13000);
 const INDOOR = generateCategoryPuzzles('Indoor', INDOOR_KEYS, 30, 14000);
 
+const FINE_ART = generateCategoryPuzzles('Fine Art & Masterpieces', FINE_ART_KEYS, 30, 15000);
+const ICONS = generateCategoryPuzzles('Icons & Logos', ICONS_KEYS, 30, 16000);
+const MOVIES = generateCategoryPuzzles('Movies & TV Shows', MOVIES_KEYS, 30, 17000);
+const ALBUMS = generateCategoryPuzzles('Album Covers', ALBUMS_KEYS, 30, 18000);
+const GRADIENTS = generateCategoryPuzzles('Abstract & Colour Gradients', GRADIENTS_KEYS, 30, 19000);
+
 export const INITIAL_PUZZLES: PuzzleConfig[] = [
   ...CLASSIC_CARS,
   ...ANIMALS,
@@ -106,7 +144,12 @@ export const INITIAL_PUZZLES: PuzzleConfig[] = [
   ...SUMMER,
   ...AUTUMN,
   ...WINTER,
-  ...INDOOR
+  ...INDOOR,
+  ...FINE_ART,
+  ...ICONS,
+  ...MOVIES,
+  ...ALBUMS,
+  ...GRADIENTS
 ];
 
 export const DIFFICULTY_SETTINGS = {
