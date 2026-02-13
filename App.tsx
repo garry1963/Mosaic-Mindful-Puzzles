@@ -529,7 +529,7 @@ const App: React.FC = () => {
   };
 
   const renderGallery = () => {
-    const categories = ['Classic Cars', 'Animals', 'Cats', 'Disney', 'Nature', 'Urban', 'Spring', 'Summer', 'Autumn', 'Winter', 'Indoor', 'Discovery'];
+    const categories = ['Classic Cars', 'Animals', 'Cats', 'Disney Characters', 'Historical Buildings', 'People', 'Abstract', 'Nature', 'Urban', 'Spring', 'Summer', 'Autumn', 'Winter', 'Indoor', 'Discovery'];
     
     const safePuzzles = Array.isArray(galleryPuzzles) ? galleryPuzzles : [];
     
@@ -608,8 +608,9 @@ const App: React.FC = () => {
                     loading="lazy" 
                 />
                 
+                {/* Large Touch Target Preview Button for Mobile/Touch overlay */}
                 <button
-                    className="absolute top-3 right-3 p-2.5 bg-slate-900/40 hover:bg-slate-900/60 backdrop-blur-md rounded-full text-white shadow-sm z-20 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-all active:scale-95 border border-white/20"
+                    className="absolute top-0 right-0 w-12 h-12 flex items-center justify-center text-white/90 bg-slate-900/10 hover:bg-slate-900/40 transition-colors z-20 md:hidden"
                     onPointerDown={(e) => {
                         e.stopPropagation();
                         e.preventDefault(); 
@@ -626,7 +627,7 @@ const App: React.FC = () => {
                     onClick={(e) => e.stopPropagation()}
                     aria-label="Preview"
                 >
-                    <Eye size={16} />
+                    <Eye size={20} className="drop-shadow-md" />
                 </button>
 
                 {isCompleted ? (
@@ -681,15 +682,16 @@ const App: React.FC = () => {
                         )}
                     </div>
 
+                    {/* Touchscreen Optimized Preview Button - Visible on all screens for touch access */}
                     <button 
                         onClick={(e) => {
                             e.stopPropagation();
                             setPreviewPuzzle(puzzle);
                         }}
-                        className="p-1.5 -mr-1 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors active:scale-95 active:bg-indigo-100 md:hidden"
+                        className="w-10 h-10 flex items-center justify-center -mr-2 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-full transition-colors active:scale-95 active:bg-indigo-100"
                         aria-label="Preview Image"
                     >
-                        <Eye size={16} />
+                        <Eye size={20} />
                     </button>
                 </div>
             </div>

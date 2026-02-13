@@ -1,210 +1,112 @@
 import { PuzzleConfig, Difficulty } from "./types";
 
-// Helper to generate consistent categorized puzzles
+// ----------------------------------------------------------------------
+// KEYWORD COLLECTIONS (30 unique terms per category for variety)
+// ----------------------------------------------------------------------
+
+const CLASSIC_CARS_KEYS = "vintage car,classic car,muscle car,sports car,antique car,retro dashboard,chrome bumper,headlight,convertible,mustang,corvette,ferrari classic,porsche classic,vw beetle,camper van,hot rod,sedan,coupe,roadster,luxury car,steering wheel,engine,rims,hood ornament,tail light,grille,leather seat,speedometer,car show,rust car";
+
+const ANIMALS_KEYS = "lion,tiger,bear,elephant,giraffe,zebra,monkey,gorilla,wolf,fox,deer,moose,racoon,squirrel,rabbit,eagle,owl,parrot,penguin,dolphin,whale,shark,turtle,frog,snake,lizard,butterfly,bee,horse,cow";
+
+const DISNEY_KEYS = "mickey mouse,minnie mouse,donald duck,goofy,pluto,cinderella,snow white,ariel mermaid,belle beauty beast,jasmine aladdin,rapunzel tangled,elsa frozen,anna frozen,moana,tiana frog,merida brave,tinkerbell,peter pan,captain hook,alice wonderland,mad hatter,winnie pooh,tigger,stitch lilo,woody toy story,buzz lightyear,finding nemo,dory fish,monsters inc,lightning mcqueen";
+
+const CATS_KEYS = "tabby cat,siamese cat,persian cat,maine coon,black cat,white cat,orange cat,calico cat,sleeping cat,playing kitten,cat eyes,cat paw,whiskers,funny cat,grumpy cat,cat portrait,fluffy cat,hairless cat,bengal cat,ragdoll cat,british shorthair,scottish fold,sphynx cat,siberian cat,burmese cat,russian blue,savannah cat,norwegian forest cat,cute kitten,cat stretching";
+
+const HISTORICAL_KEYS = "castle,palace,cathedral,temple,pyramid,colosseum,parthenon,taj mahal,great wall china,eiffel tower,big ben,statue liberty,machu picchu,petra jordan,angkor wat,acropolis,stonehenge,leaning tower pisa,hagia sophia,notre dame,versailles,neuschwanstein,himeji castle,forbidden city,kremlin,st basils,pantheon rome,mount rushmore,golden gate bridge,brooklyn bridge";
+
+const PEOPLE_KEYS = "portrait woman,portrait man,happy child,elderly smiling,diverse group,fashion model,street portrait,candid laughing,musician playing,artist painting,dancer ballet,athlete running,doctor,chef cooking,business person,student studying,teacher,mother baby,father son,couple hugging,friends selfie,traveler,hiker,yoga pose,meditation,reading book,drinking coffee,playing guitar,holding flowers,wearing hat";
+
+const ABSTRACT_KEYS = "abstract art,fractal,geometric pattern,colorful fluid,bokeh lights,macro texture,paint splash,ink water,smoke swirls,fire flame,glitch art,low poly,wireframe,neon lights,holographic,iridescent,metallic,wood grain,marble,crystal,diamond,glass prism,kaleidoscope,mandala,zen circles,minimalist,gradient,vaporwave,synthwave,fluid acrylic";
+
+const NATURE_KEYS = "mountain peak,forest path,waterfall,lake reflection,sunset beach,desert dunes,snowy mountain,autumn forest,spring meadow,flower field,tropical island,canyon,river stream,thunderstorm,rainbow,starry night,northern lights,volcano,coral reef,jungle,bamboo forest,cave,glacier,cliff edge,wheat field,cherry blossom,palm tree,cactus,mossy rock,ocean wave";
+
+const URBAN_KEYS = "city skyline,skyscraper,street lights,neon sign,busy intersection,subway station,graffiti art,bridge night,taxi cab,bus stop,rooftop view,alleyway,brick wall,concrete texture,glass building,urban park,street food,traffic trails,bicycle,scooter,pedestrian crossing,city rain,lamppost,fire escape,storefront,market stall,construction site,crane,train track,harbor";
+
+const SPRING_KEYS = "spring flowers,tulips,daffodils,cherry blossom,green grass,baby animals,easter eggs,butterfly,rain boots,rainbow,sprout,garden,blooming tree,nest eggs,bird singing,bee flower,ladybug,picnic,kite flying,umbrella,dew drops,sunbeam,fresh fruit,vegetable garden,watering can,wheelbarrow,fence,park bench,bicycle basket,spring cleaning";
+
+const SUMMER_KEYS = "summer beach,ice cream,sunglasses,swimming pool,palm tree,sand castle,surfboard,beach ball,flip flops,sun hat,lemonade,bbq grill,camping tent,campfire,fireworks,watermelon,pineapple,coconut,cocktail,sailboat,jetski,lifeguard tower,seagull,seashell,starfish,crab,jellyfish,sunflower,picnic blanket,road trip";
+
+const AUTUMN_KEYS = "autumn leaves,pumpkin,halloween,thanksgiving,acorn,pinecone,mushroom,forest fog,rainy window,umbrella,boots,scarf,sweater,fireplace,hot chocolate,apple pie,corn field,scarecrow,hay bale,tractor,barn,harvest,orange tree,red maple,yellow aspen,fallen leaves,park bench,squirrel nut,owl tree,full moon";
+
+const WINTER_KEYS = "winter snow,snowflake,snowman,ice cycle,frozen lake,skiing,snowboarding,sledding,fireplace,hot cocoa,christmas tree,gifts,reindeer,santa,ornament,wreath,lights,candle,sweater,mittens,scarf,hat,boots,cabin snow,pine tree,cardinal bird,polar bear,penguin,husky dog,aurora borealis";
+
+const INDOOR_KEYS = "cozy living room,modern kitchen,luxury bedroom,home library,reading nook,coffee shop,restaurant,hotel lobby,hallway,staircase,window view,sofa,armchair,dining table,chandelier,bookshelf,house plant,desk setup,gaming room,loft,apartment,fireplace,bathroom spa,walk in closet,wine cellar,attic,sunroom,conservatory,garage,basement";
+
+// ----------------------------------------------------------------------
+// GENERATOR FUNCTION
+// ----------------------------------------------------------------------
+
 const generateCategoryPuzzles = (
   category: string, 
-  query: string, 
+  keywordsString: string, 
   count: number, 
   startLockId: number
 ): PuzzleConfig[] => {
   const difficulties: Difficulty[] = ['easy', 'normal', 'hard', 'expert'];
+  const keywords = keywordsString.split(',').map(s => s.trim());
   
   return Array.from({ length: count }, (_, i) => {
     // Deterministic difficulty based on index
     const difficulty = difficulties[i % 4];
     
+    // Rotate through keywords to guarantee variety
+    const keyword = keywords[i % keywords.length];
+    
+    // Capitalize for title
+    const titleKeyword = keyword.split(' ')
+      .map(w => w.charAt(0).toUpperCase() + w.slice(1))
+      .join(' ');
+
+    // Use comma separation for URL search to increase hit rate on LoremFlickr
+    const urlKeyword = keyword.replace(/\s+/g, ',');
+
     return {
-      id: `${category.toLowerCase().replace(/\s+/g, '-')}-${i + 1}`,
-      title: `${category} Collection ${i + 1}`,
-      // Use loremflickr with lock to ensure the image is consistent for the puzzle session
-      src: `https://loremflickr.com/800/800/${query}?lock=${startLockId + i}`,
+      // Added '-v2' to ID to invalidate previous duplicate cache
+      id: `${category.toLowerCase().replace(/\s+/g, '-')}-v2-${i + 1}`,
+      title: `${titleKeyword}`,
+      // Use both keyword AND lock to ensure stability and uniqueness
+      src: `https://loremflickr.com/800/800/${urlKeyword}?lock=${startLockId + i}`,
       difficulty,
       category
     };
   });
 };
 
-const CLASSIC_CARS = generateCategoryPuzzles('Classic Cars', 'classic,car', 30, 1000);
-const ANIMALS = generateCategoryPuzzles('Animals', 'wildlife,animal', 30, 2000);
-// Disney specific might be tricky with generic stock services, using terms that might evoke the style
-const DISNEY = generateCategoryPuzzles('Disney', 'castle,cartoon,fantasy,amusement', 30, 3000);
-// Updated keywords to avoid humans (removed 'cute', added 'portrait')
-const CATS = generateCategoryPuzzles('Cats', 'cat,kitten,feline,portrait', 30, 4000);
+// ----------------------------------------------------------------------
+// COLLECTIONS
+// ----------------------------------------------------------------------
 
-const EXISTING_PUZZLES: PuzzleConfig[] = [
-  // Existing & Categorized
-  {
-    id: 'p1',
-    title: 'Serene Lake',
-    src: 'https://picsum.photos/id/10/800/800',
-    difficulty: 'easy',
-    category: 'Nature'
-  },
-  {
-    id: 'p2',
-    title: 'Mountain Fog',
-    src: 'https://picsum.photos/id/16/800/800',
-    difficulty: 'normal',
-    category: 'Nature'
-  },
-  {
-    id: 'p3',
-    title: 'Autumn Path',
-    src: 'https://picsum.photos/id/28/800/800',
-    difficulty: 'hard',
-    category: 'Autumn'
-  },
-  {
-    id: 'p4',
-    title: 'City Lights',
-    src: 'https://picsum.photos/id/54/800/800',
-    difficulty: 'expert',
-    category: 'Urban'
-  },
-  {
-    id: 'p5',
-    title: 'Morning Dew',
-    src: 'https://picsum.photos/id/104/800/800',
-    difficulty: 'normal',
-    category: 'Spring'
-  },
-  {
-    id: 'p6',
-    title: 'Coastal Cliff',
-    src: 'https://picsum.photos/id/29/800/800',
-    difficulty: 'normal',
-    category: 'Summer'
-  },
-  {
-    id: 'p7',
-    title: 'Strawberry Fields',
-    src: 'https://picsum.photos/id/108/800/800',
-    difficulty: 'easy',
-    category: 'Summer'
-  },
-  {
-    id: 'p8',
-    title: 'Urban Geometry',
-    src: 'https://picsum.photos/id/122/800/800',
-    difficulty: 'hard',
-    category: 'Urban'
-  },
-  {
-    id: 'p9',
-    title: 'Starry Night',
-    src: 'https://picsum.photos/id/142/800/800',
-    difficulty: 'expert',
-    category: 'Nature'
-  },
-  {
-    id: 'p10',
-    title: 'Rainy Window',
-    src: 'https://picsum.photos/id/184/800/800',
-    difficulty: 'normal',
-    category: 'Autumn'
-  },
-  {
-    id: 'p11',
-    title: 'Old Library',
-    src: 'https://picsum.photos/id/192/800/800',
-    difficulty: 'hard',
-    category: 'Indoor'
-  },
-  {
-    id: 'p12',
-    title: 'Deep Forest',
-    src: 'https://picsum.photos/id/234/800/800',
-    difficulty: 'normal',
-    category: 'Nature'
-  },
-  {
-    id: 'p13',
-    title: 'Winter Peak',
-    src: 'https://picsum.photos/id/239/800/800',
-    difficulty: 'easy',
-    category: 'Winter'
-  },
-  {
-    id: 'p14',
-    title: 'Desert Dunes',
-    src: 'https://picsum.photos/id/249/800/800',
-    difficulty: 'hard',
-    category: 'Nature'
-  },
-  {
-    id: 'p15',
-    title: 'Coffee Break',
-    src: 'https://picsum.photos/id/251/800/800',
-    difficulty: 'easy',
-    category: 'Indoor'
-  },
-  {
-    id: 'p16',
-    title: 'Ancient Stone',
-    src: 'https://picsum.photos/id/268/800/800',
-    difficulty: 'expert',
-    category: 'Nature'
-  },
-  {
-    id: 'p17',
-    title: 'Golden Gate',
-    src: 'https://picsum.photos/id/364/800/800',
-    difficulty: 'normal',
-    category: 'Urban'
-  },
-  {
-    id: 'p18',
-    title: 'Vintage Vibes',
-    src: 'https://picsum.photos/id/389/800/800',
-    difficulty: 'normal',
-    category: 'Indoor'
-  },
-  {
-    id: 'p19',
-    title: 'Lighthouse',
-    src: 'https://picsum.photos/id/400/800/800',
-    difficulty: 'hard',
-    category: 'Summer'
-  },
-  {
-    id: 'p20',
-    title: 'Misty River',
-    src: 'https://picsum.photos/id/410/800/800',
-    difficulty: 'easy',
-    category: 'Nature'
-  },
+const CLASSIC_CARS = generateCategoryPuzzles('Classic Cars', CLASSIC_CARS_KEYS, 30, 1000);
+const ANIMALS = generateCategoryPuzzles('Animals', ANIMALS_KEYS, 30, 2000);
+const DISNEY = generateCategoryPuzzles('Disney Characters', DISNEY_KEYS, 30, 3000);
+const CATS = generateCategoryPuzzles('Cats', CATS_KEYS, 30, 4000);
+const HISTORICAL = generateCategoryPuzzles('Historical Buildings', HISTORICAL_KEYS, 30, 5000);
+const PEOPLE = generateCategoryPuzzles('People', PEOPLE_KEYS, 30, 6000);
+const ABSTRACT = generateCategoryPuzzles('Abstract', ABSTRACT_KEYS, 30, 7000);
 
-  // SPRING PACK
-  { id: 's1', title: 'Cherry Blossom', src: 'https://picsum.photos/id/360/800/800', difficulty: 'normal', category: 'Spring' },
-  { id: 's2', title: 'Green Shoot', src: 'https://picsum.photos/id/406/800/800', difficulty: 'easy', category: 'Spring' },
-  { id: 's3', title: 'Floral Meadow', src: 'https://picsum.photos/id/429/800/800', difficulty: 'hard', category: 'Spring' },
-  { id: 's4', title: 'Gentle Stream', src: 'https://picsum.photos/id/412/800/800', difficulty: 'normal', category: 'Spring' },
-
-  // SUMMER PACK
-  { id: 'su1', title: 'Azure Coast', src: 'https://picsum.photos/id/431/800/800', difficulty: 'normal', category: 'Summer' },
-  { id: 'su2', title: 'Sunflowers', src: 'https://picsum.photos/id/444/800/800', difficulty: 'hard', category: 'Summer' },
-  { id: 'su3', title: 'Palm Shadows', src: 'https://picsum.photos/id/452/800/800', difficulty: 'easy', category: 'Summer' },
-  { id: 'su4', title: 'Clear Sky', src: 'https://picsum.photos/id/453/800/800', difficulty: 'normal', category: 'Summer' },
-
-  // AUTUMN PACK
-  { id: 'au1', title: 'Golden Leaves', src: 'https://picsum.photos/id/465/800/800', difficulty: 'normal', category: 'Autumn' },
-  { id: 'au2', title: 'Harvest Time', src: 'https://picsum.photos/id/486/800/800', difficulty: 'hard', category: 'Autumn' },
-  { id: 'au3', title: 'Foggy Woods', src: 'https://picsum.photos/id/491/800/800', difficulty: 'expert', category: 'Autumn' },
-  { id: 'au4', title: 'Rustic Barn', src: 'https://picsum.photos/id/511/800/800', difficulty: 'easy', category: 'Autumn' },
-
-  // WINTER PACK
-  { id: 'w1', title: 'Snowy Peaks', src: 'https://picsum.photos/id/551/800/800', difficulty: 'hard', category: 'Winter' },
-  { id: 'w2', title: 'Frozen Lake', src: 'https://picsum.photos/id/566/800/800', difficulty: 'expert', category: 'Winter' },
-  { id: 'w3', title: 'Cozy Fire', src: 'https://picsum.photos/id/571/800/800', difficulty: 'easy', category: 'Winter' },
-  { id: 'w4', title: 'Ice Crystals', src: 'https://picsum.photos/id/577/800/800', difficulty: 'normal', category: 'Winter' },
-];
+const NATURE = generateCategoryPuzzles('Nature', NATURE_KEYS, 30, 8000);
+const URBAN = generateCategoryPuzzles('Urban', URBAN_KEYS, 30, 9000);
+const SPRING = generateCategoryPuzzles('Spring', SPRING_KEYS, 30, 10000);
+const SUMMER = generateCategoryPuzzles('Summer', SUMMER_KEYS, 30, 11000);
+const AUTUMN = generateCategoryPuzzles('Autumn', AUTUMN_KEYS, 30, 12000);
+const WINTER = generateCategoryPuzzles('Winter', WINTER_KEYS, 30, 13000);
+const INDOOR = generateCategoryPuzzles('Indoor', INDOOR_KEYS, 30, 14000);
 
 export const INITIAL_PUZZLES: PuzzleConfig[] = [
-  ...EXISTING_PUZZLES,
   ...CLASSIC_CARS,
   ...ANIMALS,
   ...CATS,
-  ...DISNEY
+  ...DISNEY,
+  ...HISTORICAL,
+  ...PEOPLE,
+  ...ABSTRACT,
+  ...NATURE,
+  ...URBAN,
+  ...SPRING,
+  ...SUMMER,
+  ...AUTUMN,
+  ...WINTER,
+  ...INDOOR
 ];
 
 export const DIFFICULTY_SETTINGS = {
