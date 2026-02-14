@@ -1,8 +1,8 @@
 import { PuzzleConfig, GeneratedImage } from "../types";
-import { getImageFromDB, saveImageToDB } from "../utils/db";
+import { getImageFromDB, saveImageToDB, deleteImageFromDB } from "../utils/db";
 
 // Helper to generate a thumbnail blob from a source blob
-const generateThumbnail = (sourceBlob: Blob, size: number = 300): Promise<Blob> => {
+export const generateThumbnail = (sourceBlob: Blob, size: number = 300): Promise<Blob> => {
     return new Promise((resolve) => {
         const img = new Image();
         const url = URL.createObjectURL(sourceBlob);
@@ -153,4 +153,70 @@ export const persistGeneratedMetadata = (images: GeneratedImage[]) => {
     } catch (e) {
         console.error("Failed to save metadata", e);
     }
+};
+
+// --- User Uploaded Puzzle Storage ---
+
+export const saveUserUploadedPuzzle = async (file: File, title: string, category: string): Promise<PuzzleConfig> => {
+    const id = `upload-${Date.now()}`;
+    const thumbBlob = await generateThumbnail(file);
+    
+    // Save to DB
+    await saveImageToDB(id, file, thumbBlob);
+    
+    const puzzleConfig: PuzzleConfig = {
+        id,
+        src: URL.createObjectURL(file), // Temporary URL for immediate use
+        title,
+        category,
+        difficulty: 'normal',
+        isUserUpload: true
+    };
+    
+    // Load existing metadata
+    const existingStr = localStorage.getItem('mosaic_user_uploads');
+    const existing: PuzzleConfig[] = existingStr ? JSON.parse(existingStr) : [];
+    
+    // Save metadata (excluding transient src)
+    const toSave = [{...puzzleConfig, src: ''}, ...existing];
+    localStorage.setItem('mosaic_user_uploads', JSON.stringify(toSave));
+    
+    return puzzleConfig;
+};
+
+export const loadUserUploadedPuzzles = async (): Promise<PuzzleConfig[]> => {
+    try {
+        const metaStr = localStorage.getItem('mosaic_user_uploads');
+        if (!metaStr) return [];
+        
+        const metadata: PuzzleConfig[] = JSON.parse(metaStr);
+        const results: PuzzleConfig[] = [];
+        
+        for (const m of metadata) {
+            const record = await getImageFromDB(m.id);
+            if (record) {
+                // Determine which blob to use based on context, but here we just need a valid URL
+                // We use thumb for list, full for game. Logic in app handles getFullQualityImage.
+                // We provide thumb URL initially as 'src' for Gallery performance.
+                results.push({ ...m, src: URL.createObjectURL(record.thumbBlob) });
+            }
+        }
+        return results;
+    } catch (e) {
+        console.error("Failed to load user uploads", e);
+        return [];
+    }
+};
+
+export const deleteUserUploadedPuzzle = async (id: string): Promise<void> => {
+    // 1. Remove from Metadata
+    const metaStr = localStorage.getItem('mosaic_user_uploads');
+    if (metaStr) {
+        const metadata: PuzzleConfig[] = JSON.parse(metaStr);
+        const updated = metadata.filter(p => p.id !== id);
+        localStorage.setItem('mosaic_user_uploads', JSON.stringify(updated));
+    }
+
+    // 2. Remove from DB
+    await deleteImageFromDB(id);
 };

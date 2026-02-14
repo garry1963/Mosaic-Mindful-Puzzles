@@ -12,6 +12,7 @@ export interface PuzzleConfig {
   difficulty?: Difficulty;
   isDaily?: boolean;
   category?: string;
+  isUserUpload?: boolean;
 }
 
 export interface GeneratedImage {

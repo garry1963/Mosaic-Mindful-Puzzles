@@ -90,11 +90,11 @@ const generateCategoryPuzzles = (
     // STRICTER URL GENERATION:
     // 1. Replace spaces with commas
     // 2. Append '/all' to LoremFlickr URL to enforce "Match ALL keywords"
-    // 3. Use v3 ID to bust cache.
+    // 3. Use v4 ID to bust cache and force fresh load.
     const urlKeyword = keyword.replace(/\s+/g, ',');
 
     return {
-      id: `${category.toLowerCase().replace(/\s+/g, '-')}-v3-${i + 1}`,
+      id: `${category.toLowerCase().replace(/\s+/g, '-')}-v4-${i + 1}`,
       title: title,
       // The '/all' suffix ensures relevance by requiring all tags to match.
       src: `https://loremflickr.com/800/800/${urlKeyword}/all?lock=${startLockId + i}`,
@@ -108,27 +108,28 @@ const generateCategoryPuzzles = (
 // COLLECTIONS
 // ----------------------------------------------------------------------
 
-const CLASSIC_CARS = generateCategoryPuzzles('Classic Cars', CLASSIC_CARS_KEYS, 30, 1000);
-const ANIMALS = generateCategoryPuzzles('Animals', ANIMALS_KEYS, 30, 2000);
-const DISNEY = generateCategoryPuzzles('Disney Characters', DISNEY_KEYS, 30, 3000);
-const CATS = generateCategoryPuzzles('Cats', CATS_KEYS, 30, 4000);
-const HISTORICAL = generateCategoryPuzzles('Historical Buildings', HISTORICAL_KEYS, 30, 5000);
-const PEOPLE = generateCategoryPuzzles('People', PEOPLE_KEYS, 30, 6000);
-const ABSTRACT = generateCategoryPuzzles('Abstract', ABSTRACT_KEYS, 30, 7000);
+// Shifted lock IDs by 50000 to ensure fresh images for v4
+const CLASSIC_CARS = generateCategoryPuzzles('Classic Cars', CLASSIC_CARS_KEYS, 30, 51000);
+const ANIMALS = generateCategoryPuzzles('Animals', ANIMALS_KEYS, 30, 52000);
+const DISNEY = generateCategoryPuzzles('Disney Characters', DISNEY_KEYS, 30, 53000);
+const CATS = generateCategoryPuzzles('Cats', CATS_KEYS, 30, 54000);
+const HISTORICAL = generateCategoryPuzzles('Historical Buildings', HISTORICAL_KEYS, 30, 55000);
+const PEOPLE = generateCategoryPuzzles('People', PEOPLE_KEYS, 30, 56000);
+const ABSTRACT = generateCategoryPuzzles('Abstract', ABSTRACT_KEYS, 30, 57000);
 
-const NATURE = generateCategoryPuzzles('Nature', NATURE_KEYS, 30, 8000);
-const URBAN = generateCategoryPuzzles('Urban', URBAN_KEYS, 30, 9000);
-const SPRING = generateCategoryPuzzles('Spring', SPRING_KEYS, 30, 10000);
-const SUMMER = generateCategoryPuzzles('Summer', SUMMER_KEYS, 30, 11000);
-const AUTUMN = generateCategoryPuzzles('Autumn', AUTUMN_KEYS, 30, 12000);
-const WINTER = generateCategoryPuzzles('Winter', WINTER_KEYS, 30, 13000);
-const INDOOR = generateCategoryPuzzles('Indoor', INDOOR_KEYS, 30, 14000);
+const NATURE = generateCategoryPuzzles('Nature', NATURE_KEYS, 30, 58000);
+const URBAN = generateCategoryPuzzles('Urban', URBAN_KEYS, 30, 59000);
+const SPRING = generateCategoryPuzzles('Spring', SPRING_KEYS, 30, 60000);
+const SUMMER = generateCategoryPuzzles('Summer', SUMMER_KEYS, 30, 61000);
+const AUTUMN = generateCategoryPuzzles('Autumn', AUTUMN_KEYS, 30, 62000);
+const WINTER = generateCategoryPuzzles('Winter', WINTER_KEYS, 30, 63000);
+const INDOOR = generateCategoryPuzzles('Indoor', INDOOR_KEYS, 30, 64000);
 
-const FINE_ART = generateCategoryPuzzles('Fine Art & Masterpieces', FINE_ART_KEYS, 30, 15000);
-const ICONS = generateCategoryPuzzles('Icons & Logos', ICONS_KEYS, 30, 16000);
-const MOVIES = generateCategoryPuzzles('Movies & TV Shows', MOVIES_KEYS, 30, 17000);
-const ALBUMS = generateCategoryPuzzles('Album Covers', ALBUMS_KEYS, 30, 18000);
-const GRADIENTS = generateCategoryPuzzles('Abstract & Colour Gradients', GRADIENTS_KEYS, 30, 19000);
+const FINE_ART = generateCategoryPuzzles('Fine Art & Masterpieces', FINE_ART_KEYS, 30, 65000);
+const ICONS = generateCategoryPuzzles('Icons & Logos', ICONS_KEYS, 30, 66000);
+const MOVIES = generateCategoryPuzzles('Movies & TV Shows', MOVIES_KEYS, 30, 67000);
+const ALBUMS = generateCategoryPuzzles('Album Covers', ALBUMS_KEYS, 30, 68000);
+const GRADIENTS = generateCategoryPuzzles('Abstract & Colour Gradients', GRADIENTS_KEYS, 30, 69000);
 
 export const INITIAL_PUZZLES: PuzzleConfig[] = [
   ...CLASSIC_CARS,

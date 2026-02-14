@@ -49,3 +49,14 @@ export const getImageFromDB = async (id: string): Promise<ImageRecord | undefine
     return undefined;
   }
 };
+
+export const deleteImageFromDB = async (id: string): Promise<void> => {
+  const db = await initDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE_IMAGES, 'readwrite');
+    const store = tx.objectStore(STORE_IMAGES);
+    const request = store.delete(id);
+    request.onsuccess = () => resolve();
+    request.onerror = () => reject(request.error);
+  });
+};

@@ -1,10 +1,12 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Home, Puzzle, Settings, Image as ImageIcon, Sparkles, Clock, ArrowLeft, RotateCcw, Flame, Play, ChevronRight, Wand2, History, Layers, HelpCircle, X, MousePointer2, RotateCw, Shapes, Eye, Lightbulb, Zap, Check, CloudDownload, WifiOff, Activity, AlertTriangle } from 'lucide-react';
+import { Home, Puzzle, Settings, Image as ImageIcon, Sparkles, Clock, ArrowLeft, RotateCcw, Flame, Play, ChevronRight, Wand2, History, Layers, HelpCircle, X, MousePointer2, RotateCw, Shapes, Eye, Lightbulb, Zap, Check, CloudDownload, WifiOff, Activity, AlertTriangle, Upload, Plus, Trash2 } from 'lucide-react';
 import GameBoard from './components/GameBoard';
 import { generateImage } from './services/geminiService';
-import { syncPuzzleImage, getFullQualityImage, saveGeneratedPuzzle, loadSavedGeneratedPuzzles, persistGeneratedMetadata } from './services/offlineStorage';
+import { syncPuzzleImage, getFullQualityImage, saveGeneratedPuzzle, loadSavedGeneratedPuzzles, persistGeneratedMetadata, saveUserUploadedPuzzle, loadUserUploadedPuzzles, deleteUserUploadedPuzzle } from './services/offlineStorage';
 import { GameState, Difficulty, PuzzleConfig, AppView, GeneratedImage } from './types';
 import { INITIAL_PUZZLES } from './constants';
+
+const CATEGORIES = ['Classic Cars', 'Animals', 'Cats', 'Disney Characters', 'Historical Buildings', 'People', 'Abstract', 'Nature', 'Urban', 'Spring', 'Summer', 'Autumn', 'Winter', 'Indoor', 'Fine Art & Masterpieces', 'Icons & Logos', 'Movies & TV Shows', 'Album Covers', 'Abstract & Colour Gradients'];
 
 const App: React.FC = () => {
   const [currentView, setCurrentView] = useState<AppView>('home');
@@ -15,6 +17,14 @@ const App: React.FC = () => {
   const [savedGameIds, setSavedGameIds] = useState<Set<string>>(new Set());
   const [completedPuzzleIds, setCompletedPuzzleIds] = useState<Set<string>>(new Set());
   const [showHowToPlay, setShowHowToPlay] = useState(false);
+  
+  // Upload State
+  const [showUploadModal, setShowUploadModal] = useState(false);
+  const [uploadFile, setUploadFile] = useState<File | null>(null);
+  const [uploadPreview, setUploadPreview] = useState<string | null>(null);
+  const [uploadCategory, setUploadCategory] = useState(CATEGORIES[0]);
+  const [uploadTitle, setUploadTitle] = useState('');
+  const [isUploading, setIsUploading] = useState(false);
   
   // Error State for graceful failure handling
   const [error, setError] = useState<{title: string, message: string} | null>(null);
@@ -95,6 +105,12 @@ const App: React.FC = () => {
                    // Skip if already has a generated thumbnail (unless it's a retry)
                    if (thumbnails[p.id]) return;
                    
+                   // Don't sync user uploads or discoveries that already have local blob URLs
+                   if (p.isUserUpload || (p.src && p.src.startsWith('blob:'))) {
+                       setThumbnails(prev => ({ ...prev, [p.id]: p.src }));
+                       return;
+                   }
+                   
                    const result = await syncPuzzleImage(p);
                    if (result.isLocal) {
                        setThumbnails(prev => ({ ...prev, [p.id]: result.thumbUrl }));
@@ -155,26 +171,22 @@ const App: React.FC = () => {
         isDaily: true
     });
 
-    // 2. New Puzzle Discovery Logic (Run once per session/mount)
-    if (!initializationRef.current) {
-        initializationRef.current = true;
-        
-        let storedDiscoveries: PuzzleConfig[] = [];
-        try {
+    const initPuzzles = async () => {
+         let storedDiscoveries: PuzzleConfig[] = [];
+         
+         // Load Discoveries
+         try {
             const storedDiscoveriesStr = localStorage.getItem('mosaic_discoveries');
             if (storedDiscoveriesStr) {
                 const parsed = JSON.parse(storedDiscoveriesStr);
-                if (Array.isArray(parsed)) {
-                    storedDiscoveries = parsed;
-                }
+                if (Array.isArray(parsed)) storedDiscoveries = parsed;
             }
-        } catch (e) {
-            console.error("Failed to parse discoveries from local storage", e);
-            localStorage.removeItem('mosaic_discoveries');
-        }
-        
-        // Ensure new discovery logic (same as before)
-        const getPicsumId = (url: string) => {
+         } catch (e) {
+             localStorage.removeItem('mosaic_discoveries');
+         }
+
+         // Generate New Discovery if needed
+         const getPicsumId = (url: string) => {
             if (!url) return -1;
             const match = url.match(/\/id\/(\d+)\//);
             return match ? parseInt(match[1]) : -1;
@@ -216,7 +228,15 @@ const App: React.FC = () => {
             localStorage.setItem('mosaic_discoveries', JSON.stringify(storedDiscoveries));
         }
 
-        setGalleryPuzzles([...INITIAL_PUZZLES, ...storedDiscoveries]);
+        // Load User Uploads
+        const userUploads = await loadUserUploadedPuzzles();
+
+        setGalleryPuzzles([...INITIAL_PUZZLES, ...storedDiscoveries, ...userUploads]);
+    };
+
+    if (!initializationRef.current) {
+        initializationRef.current = true;
+        initPuzzles();
     }
   }, []);
 
@@ -260,7 +280,6 @@ const App: React.FC = () => {
       const errStr = error.toString().toLowerCase();
       const errMsg = error.message?.toLowerCase() || "";
 
-      // Check for specific API Quota / Rate Limit errors
       if (errStr.includes('429') || errMsg.includes('quota') || errMsg.includes('resource exhausted') || errStr.includes('too many requests')) {
           title = "Quota Exceeded";
           message = "You have reached the API usage limit. Please try again later.";
@@ -273,6 +292,66 @@ const App: React.FC = () => {
     } finally {
       setIsGenerating(false);
     }
+  };
+
+  const handleUploadFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files[0]) {
+        const file = e.target.files[0];
+        // Validate Size (5MB)
+        if (file.size > 5 * 1024 * 1024) {
+            alert("File is too large. Maximum size is 5MB.");
+            return;
+        }
+        
+        setUploadFile(file);
+        setUploadTitle(file.name.split('.')[0]); // Default title
+        
+        // Create preview
+        const reader = new FileReader();
+        reader.onload = (ev) => {
+            setUploadPreview(ev.target?.result as string);
+        };
+        reader.readAsDataURL(file);
+    }
+  };
+
+  const handleUploadSubmit = async () => {
+      if (!uploadFile || !uploadCategory) return;
+      setIsUploading(true);
+      try {
+          const newPuzzle = await saveUserUploadedPuzzle(uploadFile, uploadTitle || 'Untitled', uploadCategory);
+          setGalleryPuzzles(prev => [newPuzzle, ...prev]);
+          
+          // Reset and Close
+          setShowUploadModal(false);
+          setUploadFile(null);
+          setUploadPreview(null);
+          setUploadTitle('');
+          setActiveCategory(uploadCategory); // Switch to the category we just uploaded to
+      } catch (e) {
+          console.error("Upload failed", e);
+          setError({ title: "Upload Failed", message: "Could not save your image. Please try again." });
+      } finally {
+          setIsUploading(false);
+      }
+  };
+
+  const handleDeletePuzzle = async (id: string) => {
+      if (window.confirm("Are you sure you want to delete this puzzle? This action cannot be undone.")) {
+          try {
+              await deleteUserUploadedPuzzle(id);
+              setGalleryPuzzles(prev => prev.filter(p => p.id !== id));
+              // Also clean up thumbnails cache if needed
+              setThumbnails(prev => {
+                  const newThumbnails = { ...prev };
+                  delete newThumbnails[id];
+                  return newThumbnails;
+              });
+          } catch (e) {
+              console.error("Failed to delete puzzle", e);
+              setError({ title: "Delete Failed", message: "Could not delete the puzzle. Please try again." });
+          }
+      }
   };
 
   const startPuzzle = async (puzzle: PuzzleConfig) => {
@@ -389,6 +468,97 @@ const App: React.FC = () => {
          </div>
       </div>
     </div>
+  );
+
+  const renderUploadModal = () => (
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-sm p-4 animate-in fade-in duration-200" onClick={() => setShowUploadModal(false)}>
+        <div className="bg-white rounded-3xl shadow-2xl max-w-lg w-full max-h-[90vh] overflow-y-auto relative animate-in zoom-in-95 duration-200" onClick={(e) => e.stopPropagation()}>
+           <button onClick={() => setShowUploadModal(false)} className="absolute top-4 right-4 p-2 hover:bg-slate-100 rounded-full text-slate-500 transition-colors z-10">
+             <X size={24} />
+           </button>
+           
+           <div className="p-8">
+               <div className="flex items-center gap-3 mb-6">
+                   <div className="bg-indigo-50 p-3 rounded-xl text-indigo-600">
+                       <Upload size={24} />
+                   </div>
+                   <h2 className="text-2xl font-serif text-slate-800">Upload to Gallery</h2>
+               </div>
+
+               <div className="space-y-6">
+                   {/* File Input Area */}
+                   <div className="relative">
+                       <input 
+                         type="file" 
+                         accept="image/jpeg, image/png, image/webp"
+                         onChange={handleUploadFileSelect}
+                         className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
+                       />
+                       <div className={`border-2 border-dashed rounded-2xl p-8 flex flex-col items-center justify-center text-center transition-colors ${uploadPreview ? 'border-indigo-200 bg-indigo-50/30' : 'border-slate-200 hover:border-indigo-400 hover:bg-slate-50'}`}>
+                           {uploadPreview ? (
+                               <div className="relative w-full aspect-square md:aspect-video rounded-lg overflow-hidden shadow-sm">
+                                   <img src={uploadPreview} alt="Preview" className="w-full h-full object-cover" />
+                               </div>
+                           ) : (
+                               <>
+                                   <div className="w-12 h-12 bg-indigo-50 text-indigo-500 rounded-full flex items-center justify-center mb-3">
+                                       <Plus size={24} />
+                                   </div>
+                                   <p className="font-medium text-slate-700">Click to choose an image</p>
+                                   <p className="text-sm text-slate-400 mt-1">JPEG, PNG, WebP (Max 5MB)</p>
+                               </>
+                           )}
+                       </div>
+                   </div>
+
+                   {/* Title Input */}
+                   <div>
+                       <label className="block text-sm font-bold text-slate-700 mb-2">Title</label>
+                       <input 
+                         type="text" 
+                         value={uploadTitle}
+                         onChange={(e) => setUploadTitle(e.target.value)}
+                         placeholder="My Custom Puzzle"
+                         className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500 text-slate-800 bg-slate-50"
+                       />
+                   </div>
+
+                   {/* Category Dropdown */}
+                   <div>
+                       <label className="block text-sm font-bold text-slate-700 mb-2">Category</label>
+                       <div className="relative">
+                           <select 
+                             value={uploadCategory}
+                             onChange={(e) => setUploadCategory(e.target.value)}
+                             className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500 text-slate-800 bg-slate-50 appearance-none cursor-pointer"
+                           >
+                               {CATEGORIES.map(cat => (
+                                   <option key={cat} value={cat}>{cat}</option>
+                               ))}
+                           </select>
+                           <ChevronRight className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 rotate-90 pointer-events-none" size={16} />
+                       </div>
+                   </div>
+               </div>
+
+               <div className="mt-8 pt-6 border-t border-slate-100 flex justify-end gap-3">
+                   <button 
+                     onClick={() => setShowUploadModal(false)}
+                     className="px-6 py-3 text-slate-600 font-bold hover:bg-slate-50 rounded-xl transition-colors"
+                   >
+                       Cancel
+                   </button>
+                   <button 
+                     onClick={handleUploadSubmit}
+                     disabled={!uploadFile || isUploading}
+                     className={`px-8 py-3 bg-indigo-600 text-white rounded-xl font-bold hover:bg-indigo-700 transition-colors shadow-lg shadow-indigo-200 flex items-center gap-2 ${isUploading ? 'opacity-70 cursor-wait' : ''}`}
+                   >
+                       {isUploading ? 'Saving...' : 'Add to Library'}
+                   </button>
+               </div>
+           </div>
+        </div>
+      </div>
   );
 
   const renderHome = () => {
@@ -529,9 +699,7 @@ const App: React.FC = () => {
   };
 
   const renderGallery = () => {
-    // Added new categories to the list
-    const categories = ['Classic Cars', 'Animals', 'Cats', 'Disney Characters', 'Historical Buildings', 'People', 'Abstract', 'Nature', 'Urban', 'Spring', 'Summer', 'Autumn', 'Winter', 'Indoor', 'Fine Art & Masterpieces', 'Icons & Logos', 'Movies & TV Shows', 'Album Covers', 'Abstract & Colour Gradients', 'Discovery'];
-    
+    // Categories included in constant at top
     const safePuzzles = Array.isArray(galleryPuzzles) ? galleryPuzzles : [];
     
     const filteredPuzzles = safePuzzles.filter(p => {
@@ -563,21 +731,33 @@ const App: React.FC = () => {
                 </div>
             </div>
         </div>
+        
+        {/* Category & Upload Section */}
+        <div className="flex items-center gap-4 w-full md:w-auto overflow-hidden">
+             {/* Upload Button */}
+             <button 
+                onClick={() => setShowUploadModal(true)}
+                className="flex items-center gap-2 px-4 py-3 bg-white border border-slate-200 hover:bg-slate-50 text-indigo-600 rounded-full font-bold shadow-sm transition-all active:scale-95 whitespace-nowrap"
+             >
+                 <Upload size={18} />
+                 <span>Upload</span>
+             </button>
 
-        <div className="flex items-center gap-3 overflow-x-auto pb-4 md:pb-0 custom-scrollbar max-w-full">
-            {categories.map(cat => (
-                <button 
-                    key={cat}
-                    onClick={() => setActiveCategory(cat)}
-                    className={`px-6 py-3 rounded-full text-base font-medium transition-all whitespace-nowrap active:scale-95 ${
-                        activeCategory === cat 
-                        ? 'bg-slate-800 text-white shadow-md' 
-                        : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-50'
-                    }`}
-                >
-                    {cat}
-                </button>
-            ))}
+            <div className="flex items-center gap-3 overflow-x-auto pb-4 md:pb-0 custom-scrollbar max-w-full">
+                {CATEGORIES.map(cat => (
+                    <button 
+                        key={cat}
+                        onClick={() => setActiveCategory(cat)}
+                        className={`px-6 py-3 rounded-full text-base font-medium transition-all whitespace-nowrap active:scale-95 ${
+                            activeCategory === cat 
+                            ? 'bg-slate-800 text-white shadow-md' 
+                            : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-50'
+                        }`}
+                    >
+                        {cat}
+                    </button>
+                ))}
+            </div>
         </div>
       </div>
 
@@ -630,6 +810,20 @@ const App: React.FC = () => {
                 >
                     <Eye size={20} className="drop-shadow-md" />
                 </button>
+
+                {/* Delete Button for User Uploads */}
+                {puzzle.isUserUpload && (
+                    <button
+                        onClick={(e) => {
+                            e.stopPropagation();
+                            handleDeletePuzzle(puzzle.id);
+                        }}
+                        className="absolute top-2 left-2 p-2 bg-white/90 text-rose-500 rounded-full shadow-sm hover:bg-rose-50 transition-colors z-20"
+                        title="Delete Puzzle"
+                    >
+                        <Trash2 size={16} />
+                    </button>
+                )}
 
                 {isCompleted ? (
                     <div className="absolute inset-0 bg-emerald-900/20 flex items-center justify-center pointer-events-none">
@@ -876,6 +1070,7 @@ const App: React.FC = () => {
         />
       )}
       {showHowToPlay && renderHowToPlay()}
+      {showUploadModal && renderUploadModal()}
       
       {/* Global Error Modal */}
       {error && (
