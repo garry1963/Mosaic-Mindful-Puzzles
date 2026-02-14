@@ -855,18 +855,6 @@ const App: React.FC = () => {
                     <Eye size={20} className="drop-shadow-md" />
                 </button>
 
-                {/* Delete Button (Visible on Hover for Desktop, Always Accessible on Mobile) */}
-                <button
-                    onClick={(e) => {
-                        e.stopPropagation();
-                        handleDeletePuzzle(puzzle);
-                    }}
-                    className="absolute top-2 left-2 p-2 bg-white/90 text-rose-500 rounded-full shadow-sm hover:bg-rose-50 transition-all z-20 opacity-100 md:opacity-0 md:group-hover:opacity-100"
-                    title="Delete Puzzle"
-                >
-                    <Trash2 size={16} />
-                </button>
-
                 {isCompleted ? (
                     <div className="absolute inset-0 bg-emerald-900/20 flex items-center justify-center pointer-events-none">
                          <div className="bg-emerald-500 text-white p-2.5 rounded-full shadow-lg animate-in zoom-in duration-300">
@@ -918,18 +906,32 @@ const App: React.FC = () => {
                         </div>
                         )}
                     </div>
+                    
+                    <div className="flex items-center -mr-2">
+                        {/* NEW DELETE BUTTON IN FOOTER */}
+                        <button
+                            onClick={(e) => {
+                                e.stopPropagation();
+                                handleDeletePuzzle(puzzle);
+                            }}
+                            className="w-8 h-8 flex items-center justify-center text-slate-300 hover:text-rose-500 hover:bg-rose-50 rounded-full transition-colors active:scale-95"
+                            title="Delete Puzzle"
+                        >
+                            <Trash2 size={16} />
+                        </button>
 
-                    {/* Touchscreen Optimized Preview Button - Visible on all screens for touch access */}
-                    <button 
-                        onClick={(e) => {
-                            e.stopPropagation();
-                            setPreviewPuzzle(puzzle);
-                        }}
-                        className="w-10 h-10 flex items-center justify-center -mr-2 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-full transition-colors active:scale-95 active:bg-indigo-100"
-                        aria-label="Preview Image"
-                    >
-                        <Eye size={20} />
-                    </button>
+                        {/* Touchscreen Optimized Preview Button - Visible on all screens for touch access */}
+                        <button 
+                            onClick={(e) => {
+                                e.stopPropagation();
+                                setPreviewPuzzle(puzzle);
+                            }}
+                            className="w-10 h-10 flex items-center justify-center text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-full transition-colors active:scale-95 active:bg-indigo-100"
+                            aria-label="Preview Image"
+                        >
+                            <Eye size={20} />
+                        </button>
+                    </div>
                 </div>
             </div>
           </div>
