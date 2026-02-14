@@ -450,7 +450,6 @@ const App: React.FC = () => {
      }
   };
 
-  // ... (HowToPlay Component remains same) ...
   const renderHowToPlay = () => (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-sm p-4 animate-in fade-in duration-200" onClick={() => setShowHowToPlay(false)}>
       <div className="bg-white rounded-3xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto custom-scrollbar relative animate-in zoom-in-95 duration-200" onClick={(e) => e.stopPropagation()}>
@@ -856,13 +855,13 @@ const App: React.FC = () => {
                     <Eye size={20} className="drop-shadow-md" />
                 </button>
 
-                {/* Delete Button (Visible on Hover for Desktop, Always Accessible) */}
+                {/* Delete Button (Visible on Hover for Desktop, Always Accessible on Mobile) */}
                 <button
                     onClick={(e) => {
                         e.stopPropagation();
                         handleDeletePuzzle(puzzle);
                     }}
-                    className="absolute top-2 left-2 p-2 bg-white/90 text-rose-500 rounded-full shadow-sm hover:bg-rose-50 transition-colors z-20 opacity-0 group-hover:opacity-100"
+                    className="absolute top-2 left-2 p-2 bg-white/90 text-rose-500 rounded-full shadow-sm hover:bg-rose-50 transition-all z-20 opacity-100 md:opacity-0 md:group-hover:opacity-100"
                     title="Delete Puzzle"
                 >
                     <Trash2 size={16} />
@@ -1059,13 +1058,13 @@ const App: React.FC = () => {
               <div className="relative aspect-square overflow-hidden bg-slate-100">
                  <img src={img.src} alt={img.title} className="w-full h-full object-cover" />
                  
-                 {/* Delete Generated Button */}
+                 {/* Delete Generated Button (Visible on Hover for Desktop, Always Accessible on Mobile) */}
                  <button
                     onClick={(e) => {
                         e.stopPropagation();
                         handleDeleteGenerated(img.id);
                     }}
-                    className="absolute top-2 right-2 p-2 bg-white/90 text-rose-500 rounded-full shadow-sm hover:bg-rose-50 transition-colors opacity-0 group-hover:opacity-100"
+                    className="absolute top-2 right-2 p-2 bg-white/90 text-rose-500 rounded-full shadow-sm hover:bg-rose-50 transition-all opacity-100 md:opacity-0 md:group-hover:opacity-100"
                     title="Delete Creation"
                  >
                     <Trash2 size={16} />
