@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Home, Puzzle, Settings, Image as ImageIcon, Sparkles, Clock, ArrowLeft, RotateCcw, Flame, Play, ChevronRight, Wand2, History, Layers, HelpCircle, X, MousePointer2, RotateCw, Shapes, Eye, Lightbulb, Zap, Check, CloudDownload, WifiOff, Activity, AlertTriangle, Upload, Plus, Trash2 } from 'lucide-react';
 import GameBoard from './components/GameBoard';
 import { generateImage } from './services/geminiService';
-import { syncPuzzleImage, getFullQualityImage, saveGeneratedPuzzle, loadSavedGeneratedPuzzles, persistGeneratedMetadata, saveUserUploadedPuzzle, loadUserUploadedPuzzles, deleteUserUploadedPuzzle } from './services/offlineStorage';
+import { syncPuzzleImage, getFullQualityImage, saveGeneratedPuzzle, loadSavedGeneratedPuzzles, persistGeneratedMetadata, saveUserUploadedPuzzle, loadUserUploadedPuzzles, deleteUserUploadedPuzzle, deleteGeneratedPuzzle } from './services/offlineStorage';
 import { GameState, Difficulty, PuzzleConfig, AppView, GeneratedImage } from './types';
 import { INITIAL_PUZZLES } from './constants';
 
@@ -36,6 +36,7 @@ const App: React.FC = () => {
   const [syncProgress, setSyncProgress] = useState(0);
   const [isSyncing, setIsSyncing] = useState(false);
   const [previewPuzzle, setPreviewPuzzle] = useState<PuzzleConfig | null>(null);
+  const [hiddenPuzzleIds, setHiddenPuzzleIds] = useState<Set<string>>(new Set());
   
   const initializationRef = useRef(false);
 
@@ -172,6 +173,16 @@ const App: React.FC = () => {
     });
 
     const initPuzzles = async () => {
+         // Load Hidden Puzzles
+         let hidden = new Set<string>();
+         try {
+             const hiddenStr = localStorage.getItem('mosaic_hidden_ids');
+             if (hiddenStr) {
+                 hidden = new Set(JSON.parse(hiddenStr));
+                 setHiddenPuzzleIds(hidden);
+             }
+         } catch(e) { console.error(e); }
+
          let storedDiscoveries: PuzzleConfig[] = [];
          
          // Load Discoveries
@@ -231,7 +242,10 @@ const App: React.FC = () => {
         // Load User Uploads
         const userUploads = await loadUserUploadedPuzzles();
 
-        setGalleryPuzzles([...INITIAL_PUZZLES, ...storedDiscoveries, ...userUploads]);
+        const allPuzzles = [...INITIAL_PUZZLES, ...storedDiscoveries, ...userUploads];
+        
+        // Filter out hidden puzzles
+        setGalleryPuzzles(allPuzzles.filter(p => !hidden.has(p.id)));
     };
 
     if (!initializationRef.current) {
@@ -336,21 +350,52 @@ const App: React.FC = () => {
       }
   };
 
-  const handleDeletePuzzle = async (id: string) => {
-      if (window.confirm("Are you sure you want to delete this puzzle? This action cannot be undone.")) {
-          try {
-              await deleteUserUploadedPuzzle(id);
-              setGalleryPuzzles(prev => prev.filter(p => p.id !== id));
-              // Also clean up thumbnails cache if needed
-              setThumbnails(prev => {
-                  const newThumbnails = { ...prev };
-                  delete newThumbnails[id];
-                  return newThumbnails;
-              });
-          } catch (e) {
-              console.error("Failed to delete puzzle", e);
-              setError({ title: "Delete Failed", message: "Could not delete the puzzle. Please try again." });
+  const handleDeletePuzzle = async (puzzle: PuzzleConfig) => {
+      if (!window.confirm("Are you sure you want to delete this puzzle? This action cannot be undone.")) {
+          return;
+      }
+
+      try {
+          if (puzzle.isUserUpload) {
+              await deleteUserUploadedPuzzle(puzzle.id);
+          } else if (puzzle.id.startsWith('discovery-')) {
+              // Handle discovery removal from storage
+              const storedDiscoveriesStr = localStorage.getItem('mosaic_discoveries');
+              if (storedDiscoveriesStr) {
+                  let stored: PuzzleConfig[] = JSON.parse(storedDiscoveriesStr);
+                  stored = stored.filter(p => p.id !== puzzle.id);
+                  localStorage.setItem('mosaic_discoveries', JSON.stringify(stored));
+              }
+          } else {
+              // Default puzzle - Hide via ID exclusion
+              const newHidden = new Set(hiddenPuzzleIds);
+              newHidden.add(puzzle.id);
+              setHiddenPuzzleIds(newHidden);
+              localStorage.setItem('mosaic_hidden_ids', JSON.stringify(Array.from(newHidden)));
           }
+
+          // Update State
+          setGalleryPuzzles(prev => prev.filter(p => p.id !== puzzle.id));
+          
+          // Cleanup thumbnails cache
+          setThumbnails(prev => {
+              const newThumbnails = { ...prev };
+              delete newThumbnails[puzzle.id];
+              return newThumbnails;
+          });
+      } catch (e) {
+          console.error("Failed to delete puzzle", e);
+          setError({ title: "Delete Failed", message: "Could not delete the puzzle. Please try again." });
+      }
+  };
+
+  const handleDeleteGenerated = async (id: string) => {
+      if (!window.confirm("Delete this AI generated puzzle?")) return;
+      try {
+          await deleteGeneratedPuzzle(id);
+          setGeneratedImages(prev => prev.filter(img => img.id !== id));
+      } catch (e) {
+          console.error("Failed to delete generated puzzle", e);
       }
   };
 
@@ -811,19 +856,17 @@ const App: React.FC = () => {
                     <Eye size={20} className="drop-shadow-md" />
                 </button>
 
-                {/* Delete Button for User Uploads */}
-                {puzzle.isUserUpload && (
-                    <button
-                        onClick={(e) => {
-                            e.stopPropagation();
-                            handleDeletePuzzle(puzzle.id);
-                        }}
-                        className="absolute top-2 left-2 p-2 bg-white/90 text-rose-500 rounded-full shadow-sm hover:bg-rose-50 transition-colors z-20"
-                        title="Delete Puzzle"
-                    >
-                        <Trash2 size={16} />
-                    </button>
-                )}
+                {/* Delete Button (Visible on Hover for Desktop, Always Accessible) */}
+                <button
+                    onClick={(e) => {
+                        e.stopPropagation();
+                        handleDeletePuzzle(puzzle);
+                    }}
+                    className="absolute top-2 left-2 p-2 bg-white/90 text-rose-500 rounded-full shadow-sm hover:bg-rose-50 transition-colors z-20 opacity-0 group-hover:opacity-100"
+                    title="Delete Puzzle"
+                >
+                    <Trash2 size={16} />
+                </button>
 
                 {isCompleted ? (
                     <div className="absolute inset-0 bg-emerald-900/20 flex items-center justify-center pointer-events-none">
@@ -1016,14 +1059,26 @@ const App: React.FC = () => {
               <div className="relative aspect-square overflow-hidden bg-slate-100">
                  <img src={img.src} alt={img.title} className="w-full h-full object-cover" />
                  
+                 {/* Delete Generated Button */}
+                 <button
+                    onClick={(e) => {
+                        e.stopPropagation();
+                        handleDeleteGenerated(img.id);
+                    }}
+                    className="absolute top-2 right-2 p-2 bg-white/90 text-rose-500 rounded-full shadow-sm hover:bg-rose-50 transition-colors opacity-0 group-hover:opacity-100"
+                    title="Delete Creation"
+                 >
+                    <Trash2 size={16} />
+                 </button>
+
                  {isCompleted ? (
-                    <div className="absolute inset-0 bg-emerald-900/20 flex items-center justify-center">
+                    <div className="absolute inset-0 bg-emerald-900/20 flex items-center justify-center pointer-events-none">
                          <div className="bg-emerald-500 text-white p-3 rounded-full shadow-lg">
                              <Check size={20} strokeWidth={3} />
                          </div>
                     </div>
                 ) : (
-                     <div className="absolute inset-0 bg-black/10 flex items-center justify-center">
+                     <div className="absolute inset-0 bg-black/10 flex items-center justify-center pointer-events-none">
                         <div className="bg-white/90 p-3 rounded-full shadow-lg">
                             <Play size={20} className="fill-indigo-600 text-indigo-600 ml-0.5" />
                         </div>

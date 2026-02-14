@@ -145,6 +145,19 @@ export const loadSavedGeneratedPuzzles = async (): Promise<GeneratedImage[]> => 
     }
 };
 
+export const deleteGeneratedPuzzle = async (id: string): Promise<void> => {
+    // 1. Remove from Metadata
+    const metaStr = localStorage.getItem('mosaic_generated_metadata');
+    if (metaStr) {
+        const metadata: any[] = JSON.parse(metaStr);
+        const updated = metadata.filter((p: any) => p.id !== id);
+        localStorage.setItem('mosaic_generated_metadata', JSON.stringify(updated));
+    }
+
+    // 2. Remove from DB
+    await deleteImageFromDB(id);
+};
+
 export const persistGeneratedMetadata = (images: GeneratedImage[]) => {
     try {
         // Only save metadata, not the Object URL src
