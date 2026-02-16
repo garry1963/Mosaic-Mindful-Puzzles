@@ -1,5 +1,12 @@
 import React from 'react';
 import { createRoot } from 'react-dom/client';
+
+// Polyfill process.env for browser environments to prevent crashes
+// when services try to access API keys immediately on import
+if (typeof (window as any).process === 'undefined') {
+  (window as any).process = { env: {} };
+}
+
 import App from './App';
 
 const rootElement = document.getElementById('root');

@@ -754,190 +754,192 @@ const App: React.FC = () => {
     });
 
     return (
-    <div className="h-screen flex flex-col p-6 lg:p-10 max-w-7xl mx-auto w-full relative">
+    <div className="h-screen w-full relative overflow-y-auto custom-scrollbar">
       <div className="fixed top-0 left-0 w-full h-full bg-slate-50 -z-10"></div>
       
-      <div className="flex flex-col md:flex-row md:items-center justify-between mb-8 gap-6 flex-shrink-0">
-        <div className="flex items-center gap-4">
-            <button onClick={handleBack} className="p-4 bg-white hover:bg-slate-100 rounded-full shadow-sm border border-slate-100 transition-colors group active:scale-95">
-            <ArrowLeft size={28} className="text-slate-600 group-hover:text-slate-900" />
-            </button>
-            <div>
-                <h2 className="text-3xl text-slate-800">Puzzle Gallery</h2>
-                <div className="flex items-center gap-2 text-slate-500 text-sm">
-                   {isSyncing ? (
-                      <span className="flex items-center gap-1.5 text-indigo-600 font-medium">
-                        <CloudDownload size={14} className="animate-pulse" /> Syncing library... {syncProgress}%
-                      </span>
-                   ) : (
-                      <span>Select a masterpiece to begin</span>
-                   )}
+      <div className="flex flex-col p-6 lg:p-10 max-w-7xl mx-auto min-h-full">
+        <div className="flex flex-col md:flex-row md:items-center justify-between mb-8 gap-6 flex-shrink-0">
+            <div className="flex items-center gap-4">
+                <button onClick={handleBack} className="p-4 bg-white hover:bg-slate-100 rounded-full shadow-sm border border-slate-100 transition-colors group active:scale-95">
+                <ArrowLeft size={28} className="text-slate-600 group-hover:text-slate-900" />
+                </button>
+                <div>
+                    <h2 className="text-3xl text-slate-800">Puzzle Gallery</h2>
+                    <div className="flex items-center gap-2 text-slate-500 text-sm">
+                    {isSyncing ? (
+                        <span className="flex items-center gap-1.5 text-indigo-600 font-medium">
+                            <CloudDownload size={14} className="animate-pulse" /> Syncing library... {syncProgress}%
+                        </span>
+                    ) : (
+                        <span>Select a masterpiece to begin</span>
+                    )}
+                    </div>
+                </div>
+            </div>
+            
+            {/* Category & Upload Section */}
+            <div className="flex items-center gap-4 w-full md:w-auto overflow-hidden">
+                {/* Upload Button */}
+                <button 
+                    onClick={() => setShowUploadModal(true)}
+                    className="flex items-center gap-2 px-4 py-3 bg-white border border-slate-200 hover:bg-slate-50 text-indigo-600 rounded-full font-bold shadow-sm transition-all active:scale-95 whitespace-nowrap"
+                >
+                    <Upload size={18} />
+                    <span>Upload</span>
+                </button>
+
+                <div className="flex items-center gap-3 overflow-x-auto pb-4 md:pb-0 custom-scrollbar max-w-full">
+                    {CATEGORIES.map(cat => (
+                        <button 
+                            key={cat}
+                            onClick={() => setActiveCategory(cat)}
+                            className={`px-6 py-3 rounded-full text-base font-medium transition-all whitespace-nowrap active:scale-95 ${
+                                activeCategory === cat 
+                                ? 'bg-slate-800 text-white shadow-md' 
+                                : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-50'
+                            }`}
+                        >
+                            {cat}
+                        </button>
+                    ))}
                 </div>
             </div>
         </div>
-        
-        {/* Category & Upload Section */}
-        <div className="flex items-center gap-4 w-full md:w-auto overflow-hidden">
-             {/* Upload Button */}
-             <button 
-                onClick={() => setShowUploadModal(true)}
-                className="flex items-center gap-2 px-4 py-3 bg-white border border-slate-200 hover:bg-slate-50 text-indigo-600 rounded-full font-bold shadow-sm transition-all active:scale-95 whitespace-nowrap"
-             >
-                 <Upload size={18} />
-                 <span>Upload</span>
-             </button>
 
-            <div className="flex items-center gap-3 overflow-x-auto pb-4 md:pb-0 custom-scrollbar max-w-full">
-                {CATEGORIES.map(cat => (
-                    <button 
-                        key={cat}
-                        onClick={() => setActiveCategory(cat)}
-                        className={`px-6 py-3 rounded-full text-base font-medium transition-all whitespace-nowrap active:scale-95 ${
-                            activeCategory === cat 
-                            ? 'bg-slate-800 text-white shadow-md' 
-                            : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-50'
-                        }`}
-                    >
-                        {cat}
-                    </button>
-                ))}
+        {filteredPuzzles.length === 0 ? (
+            <div className="flex-1 flex flex-col items-center justify-center text-slate-400 min-h-[50vh]">
+                <ImageIcon size={48} className="opacity-20 mb-4" />
+                <p>No puzzles found in this category.</p>
             </div>
-        </div>
-      </div>
-
-      {filteredPuzzles.length === 0 ? (
-        <div className="flex-1 flex flex-col items-center justify-center text-slate-400">
-            <ImageIcon size={48} className="opacity-20 mb-4" />
-            <p>No puzzles found in this category.</p>
-        </div>
-      ) : (
-      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 overflow-y-auto custom-scrollbar pb-20 flex-1 min-h-0 pr-2">
-        {filteredPuzzles.map((puzzle, index) => {
-          if (!puzzle) return null;
-          const hasSave = savedGameIds.has(puzzle.id);
-          const isCompleted = completedPuzzleIds.has(puzzle.id);
-          
-          // Use local thumbnail if available, else original src
-          const thumbSrc = thumbnails[puzzle.id] || puzzle.src;
-          
-          return (
-          <div key={puzzle.id} 
-               onClick={() => startPuzzle(puzzle)}
-               style={{ animationDelay: `${index * 50}ms` }}
-               className="group bg-white rounded-2xl shadow-sm hover:shadow-xl transition-all duration-300 hover:-translate-y-1 overflow-hidden border border-slate-100 flex flex-col cursor-pointer active:scale-[0.98]">
-            <div className="relative aspect-square overflow-hidden bg-slate-100">
-                <img 
-                    src={thumbSrc} 
-                    alt={puzzle.title} 
-                    className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-105" 
-                    loading="lazy" 
-                />
-                
-                {/* Large Touch Target Preview Button for Mobile/Touch overlay */}
-                <button
-                    className="absolute top-0 right-0 w-12 h-12 flex items-center justify-center text-white/90 bg-slate-900/10 hover:bg-slate-900/40 transition-colors z-20 md:hidden"
-                    onPointerDown={(e) => {
-                        e.stopPropagation();
-                        e.preventDefault(); 
-                        setPreviewPuzzle(puzzle);
-                    }}
-                    onPointerUp={(e) => {
-                        e.stopPropagation();
-                        setPreviewPuzzle(null);
-                    }}
-                    onPointerLeave={(e) => {
-                        e.stopPropagation();
-                        setPreviewPuzzle(null);
-                    }}
-                    onClick={(e) => e.stopPropagation()}
-                    aria-label="Preview"
-                >
-                    <Eye size={20} className="drop-shadow-md" />
-                </button>
-
-                {isCompleted ? (
-                    <div className="absolute inset-0 bg-emerald-900/20 flex items-center justify-center pointer-events-none">
-                         <div className="bg-emerald-500 text-white p-2.5 rounded-full shadow-lg animate-in zoom-in duration-300">
-                             <Check size={18} strokeWidth={3} />
-                         </div>
-                    </div>
-                ) : (
-                    <div className="absolute inset-0 bg-black/10 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none">
-                        <div className="bg-white/90 p-3 rounded-full shadow-lg scale-90 group-hover:scale-100 transition-transform">
-                            <Play size={20} className="fill-indigo-600 text-indigo-600 ml-0.5" />
-                        </div>
-                    </div>
-                )}
-            </div>
+        ) : (
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 pb-20 pr-2">
+            {filteredPuzzles.map((puzzle, index) => {
+            if (!puzzle) return null;
+            const hasSave = savedGameIds.has(puzzle.id);
+            const isCompleted = completedPuzzleIds.has(puzzle.id);
             
-            <div 
-                className="p-3 flex flex-col gap-1.5"
-                onMouseEnter={() => setPreviewPuzzle(puzzle)}
-                onMouseLeave={() => setPreviewPuzzle(null)}
-            >
-                <div className="flex items-center justify-between">
-                    <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 truncate max-w-[60%]">{puzzle.category || 'Classic'}</span>
-                    {thumbnails[puzzle.id] && (
-                        <div className="text-[10px] text-indigo-400 bg-indigo-50 px-1.5 py-0.5 rounded flex items-center gap-1" title="Available Offline">
-                            <WifiOff size={8} /> Saved
+            // Use local thumbnail if available, else original src
+            const thumbSrc = thumbnails[puzzle.id] || puzzle.src;
+            
+            return (
+            <div key={puzzle.id} 
+                onClick={() => startPuzzle(puzzle)}
+                style={{ animationDelay: `${index * 50}ms` }}
+                className="group bg-white rounded-2xl shadow-sm hover:shadow-xl transition-all duration-300 hover:-translate-y-1 overflow-hidden border border-slate-100 flex flex-col cursor-pointer active:scale-[0.98]">
+                <div className="relative aspect-square overflow-hidden bg-slate-100">
+                    <img 
+                        src={thumbSrc} 
+                        alt={puzzle.title} 
+                        className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-105" 
+                        loading="lazy" 
+                    />
+                    
+                    {/* Large Touch Target Preview Button for Mobile/Touch overlay */}
+                    <button
+                        className="absolute top-0 right-0 w-12 h-12 flex items-center justify-center text-white/90 bg-slate-900/10 hover:bg-slate-900/40 transition-colors z-20 md:hidden"
+                        onPointerDown={(e) => {
+                            e.stopPropagation();
+                            e.preventDefault(); 
+                            setPreviewPuzzle(puzzle);
+                        }}
+                        onPointerUp={(e) => {
+                            e.stopPropagation();
+                            setPreviewPuzzle(null);
+                        }}
+                        onPointerLeave={(e) => {
+                            e.stopPropagation();
+                            setPreviewPuzzle(null);
+                        }}
+                        onClick={(e) => e.stopPropagation()}
+                        aria-label="Preview"
+                    >
+                        <Eye size={20} className="drop-shadow-md" />
+                    </button>
+
+                    {isCompleted ? (
+                        <div className="absolute inset-0 bg-emerald-900/20 flex items-center justify-center pointer-events-none">
+                            <div className="bg-emerald-500 text-white p-2.5 rounded-full shadow-lg animate-in zoom-in duration-300">
+                                <Check size={18} strokeWidth={3} />
+                            </div>
+                        </div>
+                    ) : (
+                        <div className="absolute inset-0 bg-black/10 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none">
+                            <div className="bg-white/90 p-3 rounded-full shadow-lg scale-90 group-hover:scale-100 transition-transform">
+                                <Play size={20} className="fill-indigo-600 text-indigo-600 ml-0.5" />
+                            </div>
                         </div>
                     )}
                 </div>
-                <h3 className="font-serif text-sm font-medium text-slate-800 leading-tight truncate" title={puzzle.title}>{puzzle.title}</h3>
                 
-                <div className="flex items-center justify-between mt-0.5">
-                    <div className="flex flex-wrap gap-1.5 items-center">
-                        <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded border capitalize ${
-                            (puzzle.difficulty || 'normal') === 'easy' ? 'text-sky-600 bg-sky-50 border-sky-100' :
-                            (puzzle.difficulty || 'normal') === 'hard' ? 'text-orange-600 bg-orange-50 border-orange-100' :
-                            (puzzle.difficulty || 'normal') === 'expert' ? 'text-rose-600 bg-rose-50 border-rose-100' :
-                            'text-slate-500 bg-slate-50 border-slate-100'
-                        }`}>
-                            {puzzle.difficulty || 'normal'}
-                        </span>
-                        {hasSave && (
-                        <div className="flex items-center gap-1 text-[10px] font-medium text-amber-600 bg-amber-50 px-2 py-0.5 rounded-md w-fit border border-amber-100">
-                            <History size={10} /> Resume
-                        </div>
-                        )}
-                        {isCompleted && (
-                        <div className="flex items-center gap-1 text-[10px] font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-md w-fit border border-emerald-100 uppercase tracking-wide">
-                            <Check size={10} strokeWidth={3} /> Solved
-                        </div>
+                <div 
+                    className="p-3 flex flex-col gap-1.5"
+                    onMouseEnter={() => setPreviewPuzzle(puzzle)}
+                    onMouseLeave={() => setPreviewPuzzle(null)}
+                >
+                    <div className="flex items-center justify-between">
+                        <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 truncate max-w-[60%]">{puzzle.category || 'Classic'}</span>
+                        {thumbnails[puzzle.id] && (
+                            <div className="text-[10px] text-indigo-400 bg-indigo-50 px-1.5 py-0.5 rounded flex items-center gap-1" title="Available Offline">
+                                <WifiOff size={8} /> Saved
+                            </div>
                         )}
                     </div>
+                    <h3 className="font-serif text-sm font-medium text-slate-800 leading-tight truncate" title={puzzle.title}>{puzzle.title}</h3>
                     
-                    <div className="flex items-center -mr-2">
-                        {/* NEW DELETE BUTTON IN FOOTER */}
-                        <button
-                            onClick={(e) => {
-                                e.stopPropagation();
-                                handleDeletePuzzle(puzzle);
-                            }}
-                            className="w-8 h-8 flex items-center justify-center text-slate-300 hover:text-rose-500 hover:bg-rose-50 rounded-full transition-colors active:scale-95"
-                            title="Delete Puzzle"
-                        >
-                            <Trash2 size={16} />
-                        </button>
+                    <div className="flex items-center justify-between mt-0.5">
+                        <div className="flex flex-wrap gap-1.5 items-center">
+                            <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded border capitalize ${
+                                (puzzle.difficulty || 'normal') === 'easy' ? 'text-sky-600 bg-sky-50 border-sky-100' :
+                                (puzzle.difficulty || 'normal') === 'hard' ? 'text-orange-600 bg-orange-50 border-orange-100' :
+                                (puzzle.difficulty || 'normal') === 'expert' ? 'text-rose-600 bg-rose-50 border-rose-100' :
+                                'text-slate-500 bg-slate-50 border-slate-100'
+                            }`}>
+                                {puzzle.difficulty || 'normal'}
+                            </span>
+                            {hasSave && (
+                            <div className="flex items-center gap-1 text-[10px] font-medium text-amber-600 bg-amber-50 px-2 py-0.5 rounded-md w-fit border border-amber-100">
+                                <History size={10} /> Resume
+                            </div>
+                            )}
+                            {isCompleted && (
+                            <div className="flex items-center gap-1 text-[10px] font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-md w-fit border border-emerald-100 uppercase tracking-wide">
+                                <Check size={10} strokeWidth={3} /> Solved
+                            </div>
+                            )}
+                        </div>
+                        
+                        <div className="flex items-center -mr-2">
+                            {/* DELETE BUTTON IN FOOTER */}
+                            <button
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleDeletePuzzle(puzzle);
+                                }}
+                                className="w-8 h-8 flex items-center justify-center text-slate-300 hover:text-rose-500 hover:bg-rose-50 rounded-full transition-colors active:scale-95"
+                                title="Delete Puzzle"
+                            >
+                                <Trash2 size={16} />
+                            </button>
 
-                        {/* Touchscreen Optimized Preview Button - Visible on all screens for touch access */}
-                        <button 
-                            onClick={(e) => {
-                                e.stopPropagation();
-                                setPreviewPuzzle(puzzle);
-                            }}
-                            className="w-10 h-10 flex items-center justify-center text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-full transition-colors active:scale-95 active:bg-indigo-100"
-                            aria-label="Preview Image"
-                        >
-                            <Eye size={20} />
-                        </button>
+                            {/* Touchscreen Optimized Preview Button */}
+                            <button 
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    setPreviewPuzzle(puzzle);
+                                }}
+                                className="w-10 h-10 flex items-center justify-center text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-full transition-colors active:scale-95 active:bg-indigo-100"
+                                aria-label="Preview Image"
+                            >
+                                <Eye size={20} />
+                            </button>
+                        </div>
                     </div>
                 </div>
             </div>
-          </div>
-        )})}
+            )})}
+        </div>
+        )}
       </div>
-      )}
 
       {/* Floating Preview Window (New Window Style) */}
       {previewPuzzle && (
