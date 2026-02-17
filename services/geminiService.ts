@@ -1,10 +1,9 @@
 import { GoogleGenAI } from "@google/genai";
 
-// Initialize Gemini client safely
-const apiKey = process.env.API_KEY || ''; 
-// In a real app, we might handle missing keys gracefully, but for this output we assume it's injected.
-
 export const generateImage = async (prompt: string): Promise<string | null> => {
+  // Access key lazily to prevent ReferenceError during module import phase
+  const apiKey = (typeof process !== 'undefined' && process.env) ? process.env.API_KEY : '';
+
   if (!apiKey) {
     throw new Error("API Key is missing. Please check your configuration.");
   }

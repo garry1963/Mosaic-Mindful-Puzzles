@@ -75,8 +75,8 @@ const generateCategoryPuzzles = (
   const keywords = keywordsString.split(',').map(s => s.trim());
   
   return Array.from({ length: count }, (_, i) => {
-    // Deterministic difficulty based on index
-    const difficulty = difficulties[i % 4];
+    // Randomly select difficulty
+    const difficulty = difficulties[Math.floor(Math.random() * difficulties.length)];
     
     // Rotate through keywords. We expect exactly 30 unique keywords per category.
     // If fewer are provided, we loop, but uniqueness depends on the lock.

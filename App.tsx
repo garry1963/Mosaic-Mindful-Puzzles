@@ -35,7 +35,6 @@ const App: React.FC = () => {
   const [thumbnails, setThumbnails] = useState<Record<string, string>>({});
   const [syncProgress, setSyncProgress] = useState(0);
   const [isSyncing, setIsSyncing] = useState(false);
-  const [previewPuzzle, setPreviewPuzzle] = useState<PuzzleConfig | null>(null);
   const [hiddenPuzzleIds, setHiddenPuzzleIds] = useState<Set<string>>(new Set());
   
   const initializationRef = useRef(false);
@@ -44,17 +43,21 @@ const App: React.FC = () => {
   const [streak, setStreak] = useState(0);
   const [dailyPuzzle, setDailyPuzzle] = useState<PuzzleConfig | null>(null);
 
-  // Check for saved games
+  // Check for saved games (Safely)
   const checkForSavedGames = () => {
-      const saves = new Set<string>();
-      for (let i = 0; i < localStorage.length; i++) {
-          const key = localStorage.key(i);
-          if (key && key.startsWith('mosaic_save_')) {
-              const puzzleId = key.replace('mosaic_save_', '');
-              saves.add(puzzleId);
+      try {
+          const saves = new Set<string>();
+          for (let i = 0; i < localStorage.length; i++) {
+              const key = localStorage.key(i);
+              if (key && key.startsWith('mosaic_save_')) {
+                  const puzzleId = key.replace('mosaic_save_', '');
+                  saves.add(puzzleId);
+              }
           }
+          setSavedGameIds(saves);
+      } catch (e) {
+          console.warn("LocalStorage access denied or failed", e);
       }
-      setSavedGameIds(saves);
   };
 
   // Load Generated Images from IndexedDB (Migration handled in service)
@@ -92,6 +95,8 @@ const App: React.FC = () => {
 
   // Background Scraper / Sync
   useEffect(() => {
+      let isCancelled = false;
+      
       const runSync = async () => {
           setIsSyncing(true);
           const allPuzzles = [...galleryPuzzles];
@@ -100,9 +105,12 @@ const App: React.FC = () => {
           // Process in chunks to avoid blocking UI
           const CHUNK_SIZE = 5;
           for (let i = 0; i < allPuzzles.length; i += CHUNK_SIZE) {
+              if (isCancelled) break;
+              
               const chunk = allPuzzles.slice(i, i + CHUNK_SIZE);
               
               await Promise.all(chunk.map(async (p) => {
+                   if (isCancelled) return;
                    // Skip if already has a generated thumbnail (unless it's a retry)
                    if (thumbnails[p.id]) return;
                    
@@ -113,24 +121,30 @@ const App: React.FC = () => {
                    }
                    
                    const result = await syncPuzzleImage(p);
-                   if (result.isLocal) {
+                   if (!isCancelled && result.isLocal) {
                        setThumbnails(prev => ({ ...prev, [p.id]: result.thumbUrl }));
                    }
               }));
               
               completed += chunk.length;
-              setSyncProgress(Math.min(100, Math.round((completed / allPuzzles.length) * 100)));
+              if (!isCancelled) {
+                setSyncProgress(Math.min(100, Math.round((completed / allPuzzles.length) * 100)));
+              }
               
               // Small delay to yield to main thread
               await new Promise(r => setTimeout(r, 50));
           }
-          setIsSyncing(false);
+          if (!isCancelled) setIsSyncing(false);
       };
       
       // Run sync when gallery changes (e.g. discovery added) or on mount
       // Delay slightly to let app mount first
       const timeout = setTimeout(runSync, 1000);
-      return () => clearTimeout(timeout);
+      
+      return () => {
+          isCancelled = true;
+          clearTimeout(timeout);
+      };
   }, [galleryPuzzles.length]); // Dependency on length so new discoveries trigger sync
 
   // Initialize: Load streak, Completed Puzzles, Add new daily discovery puzzle & Check saves
@@ -149,19 +163,22 @@ const App: React.FC = () => {
     }
 
     // 1. Streak Logic
-    const storedStreak = parseInt(localStorage.getItem('mosaic_streak') || '0');
-    const lastWin = localStorage.getItem('mosaic_last_win');
-    const today = new Date().toDateString();
-    const yesterday = new Date(Date.now() - 86400000).toDateString();
+    try {
+        const storedStreak = parseInt(localStorage.getItem('mosaic_streak') || '0');
+        const lastWin = localStorage.getItem('mosaic_last_win');
+        const today = new Date().toDateString();
+        const yesterday = new Date(Date.now() - 86400000).toDateString();
 
-    if (lastWin && lastWin !== today && lastWin !== yesterday) {
-        setStreak(0);
-        localStorage.setItem('mosaic_streak', '0');
-    } else {
-        setStreak(storedStreak);
-    }
+        if (lastWin && lastWin !== today && lastWin !== yesterday) {
+            setStreak(0);
+            localStorage.setItem('mosaic_streak', '0');
+        } else {
+            setStreak(storedStreak);
+        }
+    } catch(e) {}
 
     // 1.5 Generate Dynamic Daily Puzzle
+    const today = new Date().toDateString();
     const dateSeed = today.replace(/ /g, '-');
     setDailyPuzzle({
         id: `daily-${dateSeed}`,
@@ -236,7 +253,9 @@ const App: React.FC = () => {
             };
 
             storedDiscoveries = [newPuzzle, ...storedDiscoveries];
-            localStorage.setItem('mosaic_discoveries', JSON.stringify(storedDiscoveries));
+            try {
+                localStorage.setItem('mosaic_discoveries', JSON.stringify(storedDiscoveries));
+            } catch(e) {}
         }
 
         // Load User Uploads
@@ -422,31 +441,35 @@ const App: React.FC = () => {
   
   const handlePuzzleComplete = () => {
      if (selectedPuzzle) {
-        localStorage.removeItem(`mosaic_save_${selectedPuzzle.id}`);
-        
-        const newCompleted = new Set(completedPuzzleIds);
-        newCompleted.add(selectedPuzzle.id);
-        setCompletedPuzzleIds(newCompleted);
-        localStorage.setItem('mosaic_completed_ids', JSON.stringify(Array.from(newCompleted)));
+        try {
+            localStorage.removeItem(`mosaic_save_${selectedPuzzle.id}`);
+            
+            const newCompleted = new Set(completedPuzzleIds);
+            newCompleted.add(selectedPuzzle.id);
+            setCompletedPuzzleIds(newCompleted);
+            localStorage.setItem('mosaic_completed_ids', JSON.stringify(Array.from(newCompleted)));
+        } catch(e) {}
      }
      
      checkForSavedGames();
 
      if (selectedPuzzle && selectedPuzzle.isDaily) {
-         const today = new Date().toDateString();
-         const lastWin = localStorage.getItem('mosaic_last_win');
-         
-         if (lastWin !== today) {
-             const yesterday = new Date(Date.now() - 86400000).toDateString();
-             const currentStored = parseInt(localStorage.getItem('mosaic_streak') || '0');
-             let newStreak = 1;
-             if (lastWin === yesterday) {
-                 newStreak = currentStored + 1;
-             }
-             setStreak(newStreak);
-             localStorage.setItem('mosaic_streak', newStreak.toString());
-             localStorage.setItem('mosaic_last_win', today);
-         }
+         try {
+            const today = new Date().toDateString();
+            const lastWin = localStorage.getItem('mosaic_last_win');
+            
+            if (lastWin !== today) {
+                const yesterday = new Date(Date.now() - 86400000).toDateString();
+                const currentStored = parseInt(localStorage.getItem('mosaic_streak') || '0');
+                let newStreak = 1;
+                if (lastWin === yesterday) {
+                    newStreak = currentStored + 1;
+                }
+                setStreak(newStreak);
+                localStorage.setItem('mosaic_streak', newStreak.toString());
+                localStorage.setItem('mosaic_last_win', today);
+            }
+         } catch(e) {}
      }
   };
 
@@ -607,7 +630,7 @@ const App: React.FC = () => {
 
   const renderHome = () => {
     const isDailyCompleted = dailyPuzzle && completedPuzzleIds.has(dailyPuzzle.id);
-    const apiKeyExists = !!process.env.API_KEY;
+    const apiKeyExists = typeof process !== 'undefined' && !!process.env?.API_KEY;
 
     return (
     <div className="flex flex-col h-screen w-full max-w-5xl mx-auto p-6 lg:p-12 relative overflow-y-auto custom-scrollbar">
@@ -742,413 +765,262 @@ const App: React.FC = () => {
   );
   };
 
-  const renderGallery = () => {
-    // Categories included in constant at top
-    const safePuzzles = Array.isArray(galleryPuzzles) ? galleryPuzzles : [];
-    
-    const filteredPuzzles = safePuzzles.filter(p => {
-        if (!p) return false;
-        if (activeCategory === 'All') return true;
-        if (activeCategory === 'Discovery') return p.id && p.id.startsWith('discovery-');
-        return p.category === activeCategory;
-    });
+  const renderGallery = () => (
+    <div className="flex flex-col h-screen bg-slate-50">
+      <header className="flex-shrink-0 px-6 py-4 bg-white/80 backdrop-blur-md border-b border-slate-200 flex items-center justify-between sticky top-0 z-20">
+        <div className="flex items-center gap-4">
+          <button onClick={() => navigateToView('home')} className="p-2 hover:bg-slate-100 rounded-full text-slate-500 transition-colors">
+            <ArrowLeft size={24} />
+          </button>
+          <h2 className="text-xl font-serif font-bold text-slate-800">Gallery</h2>
+        </div>
+        <div className="flex items-center gap-3">
+             <button 
+                onClick={() => setShowUploadModal(true)}
+                className="flex items-center gap-2 px-4 py-2 bg-indigo-50 text-indigo-600 rounded-xl font-bold hover:bg-indigo-100 transition-colors text-sm"
+             >
+                 <Upload size={18} />
+                 <span className="hidden md:inline">Upload</span>
+             </button>
+        </div>
+      </header>
 
-    return (
-    <div className="h-screen w-full relative overflow-y-auto custom-scrollbar">
-      <div className="fixed top-0 left-0 w-full h-full bg-slate-50 -z-10"></div>
-      
-      <div className="flex flex-col p-6 lg:p-10 max-w-7xl mx-auto min-h-full">
-        <div className="flex flex-col md:flex-row md:items-center justify-between mb-8 gap-6 flex-shrink-0">
-            <div className="flex items-center gap-4">
-                <button onClick={handleBack} className="p-4 bg-white hover:bg-slate-100 rounded-full shadow-sm border border-slate-100 transition-colors group active:scale-95">
-                <ArrowLeft size={28} className="text-slate-600 group-hover:text-slate-900" />
-                </button>
-                <div>
-                    <h2 className="text-3xl text-slate-800">Puzzle Gallery</h2>
-                    <div className="flex items-center gap-2 text-slate-500 text-sm">
-                    {isSyncing ? (
-                        <span className="flex items-center gap-1.5 text-indigo-600 font-medium">
-                            <CloudDownload size={14} className="animate-pulse" /> Syncing library... {syncProgress}%
-                        </span>
-                    ) : (
-                        <span>Select a masterpiece to begin</span>
-                    )}
-                    </div>
-                </div>
-            </div>
-            
-            {/* Category & Upload Section */}
-            <div className="flex items-center gap-4 w-full md:w-auto overflow-hidden">
-                {/* Upload Button */}
+      <div className="flex flex-1 overflow-hidden">
+        {/* Categories Sidebar */}
+        <aside className="w-64 bg-white border-r border-slate-200 overflow-y-auto hidden md:block pb-safe-bottom custom-scrollbar">
+           <div className="p-4 space-y-1">
+               <button 
+                 onClick={() => setActiveCategory('All')}
+                 className={`w-full text-left px-4 py-3 rounded-xl font-medium transition-colors ${activeCategory === 'All' ? 'bg-indigo-50 text-indigo-700' : 'text-slate-600 hover:bg-slate-50'}`}
+               >
+                   All Puzzles
+               </button>
+               {CATEGORIES.map(cat => (
+                   <button 
+                     key={cat}
+                     onClick={() => setActiveCategory(cat)}
+                     className={`w-full text-left px-4 py-3 rounded-xl font-medium transition-colors ${activeCategory === cat ? 'bg-indigo-50 text-indigo-700' : 'text-slate-600 hover:bg-slate-50'}`}
+                   >
+                       {cat}
+                   </button>
+               ))}
+           </div>
+        </aside>
+
+        {/* Mobile Categories (Horizontal Scroll) */}
+        <div className="md:hidden absolute top-[73px] left-0 right-0 bg-white border-b border-slate-100 z-10 overflow-x-auto whitespace-nowrap p-2 scrollbar-hide">
+            <div className="flex gap-2 px-2">
                 <button 
-                    onClick={() => setShowUploadModal(true)}
-                    className="flex items-center gap-2 px-4 py-3 bg-white border border-slate-200 hover:bg-slate-50 text-indigo-600 rounded-full font-bold shadow-sm transition-all active:scale-95 whitespace-nowrap"
+                    onClick={() => setActiveCategory('All')}
+                    className={`px-4 py-2 rounded-full text-sm font-bold border transition-colors ${activeCategory === 'All' ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-slate-600 border-slate-200'}`}
                 >
-                    <Upload size={18} />
-                    <span>Upload</span>
+                    All
                 </button>
-
-                <div className="flex items-center gap-3 overflow-x-auto pb-4 md:pb-0 custom-scrollbar max-w-full">
-                    {CATEGORIES.map(cat => (
-                        <button 
-                            key={cat}
-                            onClick={() => setActiveCategory(cat)}
-                            className={`px-6 py-3 rounded-full text-base font-medium transition-all whitespace-nowrap active:scale-95 ${
-                                activeCategory === cat 
-                                ? 'bg-slate-800 text-white shadow-md' 
-                                : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-50'
-                            }`}
-                        >
-                            {cat}
-                        </button>
-                    ))}
-                </div>
-            </div>
-        </div>
-
-        {filteredPuzzles.length === 0 ? (
-            <div className="flex-1 flex flex-col items-center justify-center text-slate-400 min-h-[50vh]">
-                <ImageIcon size={48} className="opacity-20 mb-4" />
-                <p>No puzzles found in this category.</p>
-            </div>
-        ) : (
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 pb-20 pr-2">
-            {filteredPuzzles.map((puzzle, index) => {
-            if (!puzzle) return null;
-            const hasSave = savedGameIds.has(puzzle.id);
-            const isCompleted = completedPuzzleIds.has(puzzle.id);
-            
-            // Use local thumbnail if available, else original src
-            const thumbSrc = thumbnails[puzzle.id] || puzzle.src;
-            
-            return (
-            <div key={puzzle.id} 
-                onClick={() => startPuzzle(puzzle)}
-                style={{ animationDelay: `${index * 50}ms` }}
-                className="group bg-white rounded-2xl shadow-sm hover:shadow-xl transition-all duration-300 hover:-translate-y-1 overflow-hidden border border-slate-100 flex flex-col cursor-pointer active:scale-[0.98]">
-                <div className="relative aspect-square overflow-hidden bg-slate-100">
-                    <img 
-                        src={thumbSrc} 
-                        alt={puzzle.title} 
-                        className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-105" 
-                        loading="lazy" 
-                    />
-                    
-                    {/* Large Touch Target Preview Button for Mobile/Touch overlay */}
-                    <button
-                        className="absolute top-0 right-0 w-12 h-12 flex items-center justify-center text-white/90 bg-slate-900/10 hover:bg-slate-900/40 transition-colors z-20 md:hidden"
-                        onPointerDown={(e) => {
-                            e.stopPropagation();
-                            e.preventDefault(); 
-                            setPreviewPuzzle(puzzle);
-                        }}
-                        onPointerUp={(e) => {
-                            e.stopPropagation();
-                            setPreviewPuzzle(null);
-                        }}
-                        onPointerLeave={(e) => {
-                            e.stopPropagation();
-                            setPreviewPuzzle(null);
-                        }}
-                        onClick={(e) => e.stopPropagation()}
-                        aria-label="Preview"
+                {CATEGORIES.map(cat => (
+                    <button 
+                        key={cat}
+                        onClick={() => setActiveCategory(cat)}
+                        className={`px-4 py-2 rounded-full text-sm font-bold border transition-colors ${activeCategory === cat ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-slate-600 border-slate-200'}`}
                     >
-                        <Eye size={20} className="drop-shadow-md" />
+                        {cat}
                     </button>
-
-                    {isCompleted ? (
-                        <div className="absolute inset-0 bg-emerald-900/20 flex items-center justify-center pointer-events-none">
-                            <div className="bg-emerald-500 text-white p-2.5 rounded-full shadow-lg animate-in zoom-in duration-300">
-                                <Check size={18} strokeWidth={3} />
-                            </div>
-                        </div>
-                    ) : (
-                        <div className="absolute inset-0 bg-black/10 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none">
-                            <div className="bg-white/90 p-3 rounded-full shadow-lg scale-90 group-hover:scale-100 transition-transform">
-                                <Play size={20} className="fill-indigo-600 text-indigo-600 ml-0.5" />
-                            </div>
-                        </div>
-                    )}
-                </div>
-                
-                <div 
-                    className="p-3 flex flex-col gap-1.5"
-                    onMouseEnter={() => setPreviewPuzzle(puzzle)}
-                    onMouseLeave={() => setPreviewPuzzle(null)}
-                >
-                    <div className="flex items-center justify-between">
-                        <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 truncate max-w-[60%]">{puzzle.category || 'Classic'}</span>
-                        {thumbnails[puzzle.id] && (
-                            <div className="text-[10px] text-indigo-400 bg-indigo-50 px-1.5 py-0.5 rounded flex items-center gap-1" title="Available Offline">
-                                <WifiOff size={8} /> Saved
-                            </div>
-                        )}
-                    </div>
-                    <h3 className="font-serif text-sm font-medium text-slate-800 leading-tight truncate" title={puzzle.title}>{puzzle.title}</h3>
-                    
-                    <div className="flex items-center justify-between mt-0.5">
-                        <div className="flex flex-wrap gap-1.5 items-center">
-                            <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded border capitalize ${
-                                (puzzle.difficulty || 'normal') === 'easy' ? 'text-sky-600 bg-sky-50 border-sky-100' :
-                                (puzzle.difficulty || 'normal') === 'hard' ? 'text-orange-600 bg-orange-50 border-orange-100' :
-                                (puzzle.difficulty || 'normal') === 'expert' ? 'text-rose-600 bg-rose-50 border-rose-100' :
-                                'text-slate-500 bg-slate-50 border-slate-100'
-                            }`}>
-                                {puzzle.difficulty || 'normal'}
-                            </span>
-                            {hasSave && (
-                            <div className="flex items-center gap-1 text-[10px] font-medium text-amber-600 bg-amber-50 px-2 py-0.5 rounded-md w-fit border border-amber-100">
-                                <History size={10} /> Resume
-                            </div>
-                            )}
-                            {isCompleted && (
-                            <div className="flex items-center gap-1 text-[10px] font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-md w-fit border border-emerald-100 uppercase tracking-wide">
-                                <Check size={10} strokeWidth={3} /> Solved
-                            </div>
-                            )}
-                        </div>
-                        
-                        <div className="flex items-center -mr-2">
-                            {/* DELETE BUTTON IN FOOTER */}
-                            <button
-                                onClick={(e) => {
-                                    e.stopPropagation();
-                                    handleDeletePuzzle(puzzle);
-                                }}
-                                className="w-8 h-8 flex items-center justify-center text-slate-300 hover:text-rose-500 hover:bg-rose-50 rounded-full transition-colors active:scale-95"
-                                title="Delete Puzzle"
-                            >
-                                <Trash2 size={16} />
-                            </button>
-
-                            {/* Touchscreen Optimized Preview Button */}
-                            <button 
-                                onClick={(e) => {
-                                    e.stopPropagation();
-                                    setPreviewPuzzle(puzzle);
-                                }}
-                                className="w-10 h-10 flex items-center justify-center text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-full transition-colors active:scale-95 active:bg-indigo-100"
-                                aria-label="Preview Image"
-                            >
-                                <Eye size={20} />
-                            </button>
-                        </div>
-                    </div>
-                </div>
+                ))}
             </div>
-            )})}
         </div>
-        )}
+
+        {/* Puzzle Grid */}
+        <main className="flex-1 overflow-y-auto p-4 md:p-8 pt-16 md:pt-8 bg-slate-50 scroll-smooth custom-scrollbar">
+             <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4 md:gap-6 pb-safe-bottom">
+                 {galleryPuzzles
+                    .filter(p => activeCategory === 'All' || p.category === activeCategory)
+                    .map(puzzle => {
+                     const isCompleted = completedPuzzleIds.has(puzzle.id);
+                     const displaySrc = thumbnails[puzzle.id] || puzzle.src;
+                     
+                     return (
+                         <div 
+                           key={puzzle.id} 
+                           className="group relative aspect-square bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden cursor-pointer hover:shadow-lg hover:-translate-y-1 transition-all duration-300"
+                           onClick={() => startPuzzle(puzzle)}
+                         >
+                             <div className="absolute inset-0 bg-slate-100">
+                                 <img 
+                                    src={displaySrc} 
+                                    alt={puzzle.title}
+                                    className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-110"
+                                    loading="lazy"
+                                 />
+                             </div>
+
+                             <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
+                             
+                             {isCompleted && (
+                                 <div className="absolute top-2 right-2 bg-emerald-500 text-white p-1.5 rounded-full shadow-lg z-10">
+                                     <Check size={12} strokeWidth={3} />
+                                 </div>
+                             )}
+
+                             {(puzzle.isUserUpload || puzzle.category === 'Discovery' || puzzle.category === 'Daily') && (
+                                 <button 
+                                    onClick={(e) => { e.stopPropagation(); handleDeletePuzzle(puzzle); }}
+                                    className="absolute top-2 left-2 bg-white/90 text-rose-500 p-1.5 rounded-full opacity-0 group-hover:opacity-100 transition-opacity hover:bg-rose-50"
+                                    title="Delete"
+                                 >
+                                     <Trash2 size={14} />
+                                 </button>
+                             )}
+
+                             <div className="absolute bottom-0 left-0 right-0 p-4 transform translate-y-2 group-hover:translate-y-0 transition-transform">
+                                 <h3 className="text-white font-bold text-sm truncate shadow-black drop-shadow-md">{puzzle.title}</h3>
+                                 <div className="flex items-center justify-between mt-1">
+                                     <span className="text-[10px] text-white/80 uppercase tracking-wider font-medium">{puzzle.difficulty || 'Normal'}</span>
+                                     <div className="bg-white/20 backdrop-blur-sm rounded-full p-1.5">
+                                         <Play size={12} className="text-white fill-current" />
+                                     </div>
+                                 </div>
+                             </div>
+                         </div>
+                     );
+                 })}
+             </div>
+        </main>
       </div>
-
-      {/* Floating Preview Window (New Window Style) */}
-      {previewPuzzle && (
-          <div 
-            className="fixed inset-0 z-50 flex items-center justify-center p-6 md:inset-auto md:bottom-6 md:right-6 md:block md:p-0"
-            style={{ pointerEvents: 'auto' }}
-            onClick={() => setPreviewPuzzle(null)} // Click outside closes on mobile
-          >
-              {/* Added backdrop blur for mobile focus */}
-              <div className="absolute inset-0 bg-slate-900/20 backdrop-blur-sm md:hidden animate-in fade-in duration-200"></div>
-              
-              <div 
-                className="bg-white p-3 rounded-2xl shadow-2xl border border-slate-200 animate-in fade-in zoom-in-95 duration-200 w-full max-w-xs md:w-72 ring-4 ring-black/5 mx-auto relative z-10 md:pointer-events-auto"
-                onClick={(e) => e.stopPropagation()} // Prevent close when clicking content
-              >
-                  <button 
-                     className="absolute -top-3 -right-3 bg-slate-900 text-white rounded-full p-2 shadow-lg md:hidden z-20"
-                     onClick={() => setPreviewPuzzle(null)}
-                  >
-                     <X size={16} />
-                  </button>
-
-                  <div className="aspect-square rounded-xl overflow-hidden mb-3 relative bg-slate-100">
-                      <img 
-                        src={thumbnails[previewPuzzle.id] || previewPuzzle.src} 
-                        className="w-full h-full object-cover"
-                        alt="Preview"
-                      />
-                      <div className="absolute inset-0 ring-1 ring-inset ring-black/10 rounded-xl"></div>
-                  </div>
-                  <div className="text-center px-1 pb-1">
-                      <h4 className="font-serif font-bold text-slate-800 text-lg leading-tight mb-1">{previewPuzzle.title}</h4>
-                      <p className="text-xs text-slate-500 uppercase tracking-wider font-medium">{previewPuzzle.category || 'Gallery'}</p>
-                      
-                       <span className={`inline-block mt-2 text-[10px] font-medium px-2 py-0.5 rounded border capitalize ${
-                        (previewPuzzle.difficulty || 'normal') === 'easy' ? 'text-sky-600 bg-sky-50 border-sky-100' :
-                        (previewPuzzle.difficulty || 'normal') === 'hard' ? 'text-orange-600 bg-orange-50 border-orange-100' :
-                        (previewPuzzle.difficulty || 'normal') === 'expert' ? 'text-rose-600 bg-rose-50 border-rose-100' :
-                        'text-slate-500 bg-slate-50 border-slate-100'
-                    }`}>
-                        {previewPuzzle.difficulty || 'normal'}
-                    </span>
-                  </div>
-              </div>
-          </div>
-      )}
     </div>
   );
-  };
 
   const renderCreate = () => (
-    <div className="h-screen flex flex-col p-6 lg:p-10 max-w-6xl mx-auto w-full overflow-y-auto custom-scrollbar">
-      <div className="flex items-center gap-4 mb-8 flex-shrink-0">
-        <button onClick={handleBack} className="p-4 bg-white hover:bg-slate-100 rounded-full shadow-sm border border-slate-100 transition-colors group active:scale-95">
-          <ArrowLeft size={28} className="text-slate-600 group-hover:text-slate-900" />
-        </button>
-        <div>
-            <h2 className="text-3xl text-slate-800">AI Puzzle Studio</h2>
-            <p className="text-slate-500 text-sm">Powered by Gemini</p>
-        </div>
-      </div>
-
-      <div className="bg-white p-8 lg:p-12 rounded-[2rem] shadow-lg border border-indigo-50/50 mb-12 relative overflow-hidden flex-shrink-0">
-        <div className="absolute top-0 right-0 w-64 h-64 bg-indigo-50 rounded-full blur-3xl -mr-16 -mt-16 pointer-events-none"></div>
-        
-        <label className="block text-xl font-serif italic text-slate-700 mb-6 relative z-10">What kind of puzzle should we dream up?</label>
-        <div className="flex flex-col md:flex-row gap-4 relative z-10">
-          <input 
-            type="text" 
-            value={promptInput}
-            onChange={(e) => setPromptInput(e.target.value)}
-            placeholder="E.g., A cozy library with flying books..."
-            className="flex-1 px-6 py-5 rounded-2xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-slate-50 text-slate-800 shadow-inner text-xl placeholder:text-slate-400"
-            onKeyDown={(e) => e.key === 'Enter' && handleGeneratePuzzle()}
-          />
-          <button 
-            onClick={handleGeneratePuzzle}
-            disabled={isGenerating || !promptInput}
-            className={`px-10 py-5 rounded-2xl font-bold text-white text-lg flex items-center justify-center gap-3 transition-all min-w-[180px] active:scale-95 ${
-              isGenerating 
-                ? 'bg-indigo-300 cursor-wait' 
-                : 'bg-indigo-600 hover:bg-indigo-700 shadow-lg hover:shadow-indigo-500/30'
-            }`}
-          >
-            {isGenerating ? (
-              <>
-                <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
-                <span>Dreaming...</span>
-              </>
-            ) : (
-              <><Sparkles size={24} /> Generate</>
-            )}
+    <div className="flex flex-col h-screen bg-slate-50">
+      <header className="flex-shrink-0 px-6 py-4 bg-white/80 backdrop-blur-md border-b border-slate-200 flex items-center gap-4 sticky top-0 z-20">
+          <button onClick={() => navigateToView('home')} className="p-2 hover:bg-slate-100 rounded-full text-slate-500 transition-colors">
+            <ArrowLeft size={24} />
           </button>
-        </div>
-      </div>
-
-      <div className="flex items-center gap-3 mb-6 flex-shrink-0">
-        <Sparkles size={24} className="text-indigo-500" />
-        <h3 className="text-2xl font-medium text-slate-800">Your Creations</h3>
-      </div>
+          <h2 className="text-xl font-serif font-bold text-slate-800">AI Studio</h2>
+      </header>
       
-      {generatedImages.length === 0 ? (
-        <div className="flex-1 flex flex-col items-center justify-center text-slate-400 border-2 border-dashed border-slate-200 rounded-[2rem] p-12 bg-slate-50/50 min-h-[300px]">
-          <div className="w-24 h-24 bg-slate-100 rounded-full flex items-center justify-center mb-6">
-             <ImageIcon size={40} className="opacity-40" />
-          </div>
-          <p className="text-xl">No generated puzzles yet.</p>
-          <p className="text-base opacity-70 mt-2">Enter a prompt above to get started.</p>
-        </div>
-      ) : (
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6 overflow-y-auto custom-scrollbar pb-10 flex-shrink-0">
-          {generatedImages.map((img, index) => {
-            const hasSave = savedGameIds.has(img.id);
-            const isCompleted = completedPuzzleIds.has(img.id);
-            return (
-            <div key={img.id} 
-                 onClick={() => startPuzzle({ id: img.id, src: img.src, title: img.title, difficulty: 'normal' })}
-                 className="group bg-white rounded-3xl shadow-sm hover:shadow-xl hover:-translate-y-1 transition-all duration-300 overflow-hidden flex flex-col cursor-pointer border border-slate-100 active:scale-[0.98]"
-                 style={{ animationDelay: `${index * 100}ms` }}>
-              <div className="relative aspect-square overflow-hidden bg-slate-100">
-                 <img src={img.src} alt={img.title} className="w-full h-full object-cover" />
-                 
-                 {/* Delete Generated Button (Visible on Hover for Desktop, Always Accessible on Mobile) */}
-                 <button
-                    onClick={(e) => {
-                        e.stopPropagation();
-                        handleDeleteGenerated(img.id);
-                    }}
-                    className="absolute top-2 right-2 p-2 bg-white/90 text-rose-500 rounded-full shadow-sm hover:bg-rose-50 transition-all opacity-100 md:opacity-0 md:group-hover:opacity-100"
-                    title="Delete Creation"
-                 >
-                    <Trash2 size={16} />
-                 </button>
+      <main className="flex-1 overflow-y-auto p-4 md:p-8 pb-safe-bottom custom-scrollbar">
+         <div className="max-w-4xl mx-auto">
+             
+             <div className="bg-white rounded-3xl p-6 md:p-10 shadow-sm border border-slate-100 mb-12">
+                 <div className="flex items-center gap-3 mb-6">
+                     <div className="bg-gradient-to-br from-indigo-500 to-purple-600 text-white p-3 rounded-xl shadow-lg shadow-indigo-200">
+                         <Sparkles size={24} />
+                     </div>
+                     <div>
+                         <h3 className="text-2xl font-serif font-bold text-slate-800">Create New Puzzle</h3>
+                         <p className="text-slate-500">Describe what you want to play, and AI will paint it.</p>
+                     </div>
+                 </div>
 
-                 {isCompleted ? (
-                    <div className="absolute inset-0 bg-emerald-900/20 flex items-center justify-center pointer-events-none">
-                         <div className="bg-emerald-500 text-white p-3 rounded-full shadow-lg">
-                             <Check size={20} strokeWidth={3} />
-                         </div>
-                    </div>
-                ) : (
-                     <div className="absolute inset-0 bg-black/10 flex items-center justify-center pointer-events-none">
-                        <div className="bg-white/90 p-3 rounded-full shadow-lg">
-                            <Play size={20} className="fill-indigo-600 text-indigo-600 ml-0.5" />
-                        </div>
-                    </div>
-                )}
-              </div>
-              
-              <div className="p-4 flex flex-col gap-1">
-                 <div className="flex items-center gap-1.5 text-xs text-indigo-500 font-medium">
-                    <Sparkles size={12} /> AI Generated
+                 <div className="relative">
+                     <textarea
+                         value={promptInput}
+                         onChange={(e) => setPromptInput(e.target.value)}
+                         placeholder="A futuristic city in the clouds, cyberpunk style..."
+                         className="w-full bg-slate-50 border border-slate-200 rounded-2xl p-4 md:p-6 text-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white transition-all resize-none h-32 md:h-40 shadow-inner"
+                     />
+                     <button
+                        onClick={handleGeneratePuzzle}
+                        disabled={isGenerating || !promptInput.trim()}
+                        className={`absolute bottom-4 right-4 px-6 py-3 rounded-xl font-bold flex items-center gap-2 transition-all shadow-lg ${
+                            isGenerating || !promptInput.trim()
+                            ? 'bg-slate-200 text-slate-400 cursor-not-allowed shadow-none'
+                            : 'bg-indigo-600 text-white hover:bg-indigo-700 hover:scale-105 active:scale-95 shadow-indigo-200'
+                        }`}
+                     >
+                         {isGenerating ? (
+                             <>
+                                 <RotateCw size={18} className="animate-spin" /> Generating...
+                             </>
+                         ) : (
+                             <>
+                                 Generate <Wand2 size={18} />
+                             </>
+                         )}
+                     </button>
                  </div>
-                 <span className="font-serif text-slate-800 truncate leading-tight text-lg">{img.title}</span>
-                 
-                 <div className="flex flex-wrap gap-2 mt-1">
-                    {hasSave && (
-                       <div className="flex items-center gap-1 text-[10px] font-medium text-amber-600 bg-amber-50 px-2 py-0.5 rounded-md w-fit border border-amber-100">
-                          <History size={10} /> Resume
-                       </div>
-                    )}
-                    {isCompleted && (
-                       <div className="flex items-center gap-1 text-[10px] font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-md w-fit border border-emerald-100 uppercase tracking-wide">
-                          <Check size={10} strokeWidth={3} /> Solved
-                       </div>
-                    )}
+             </div>
+
+             {generatedImages.length > 0 && (
+                 <div>
+                     <h3 className="text-lg font-bold text-slate-800 mb-6 flex items-center gap-2">
+                         <History size={20} className="text-slate-400" /> Your Creations
+                     </h3>
+                     <div className="grid grid-cols-2 md:grid-cols-3 gap-4 md:gap-6">
+                         {generatedImages.map((img) => (
+                             <div 
+                               key={img.id}
+                               className="group relative aspect-square bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden cursor-pointer hover:shadow-lg transition-all"
+                               onClick={() => startPuzzle({ ...img, category: 'AI Generated', difficulty: 'normal' } as PuzzleConfig)}
+                             >
+                                 <img src={img.src} alt={img.title} className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-110" />
+                                 
+                                 <button 
+                                    onClick={(e) => { e.stopPropagation(); handleDeleteGenerated(img.id); }}
+                                    className="absolute top-2 right-2 bg-white/90 text-rose-500 p-2 rounded-full opacity-0 group-hover:opacity-100 transition-all hover:bg-rose-50 shadow-sm z-10"
+                                    title="Delete"
+                                 >
+                                     <Trash2 size={16} />
+                                 </button>
+
+                                 <div className="absolute bottom-0 left-0 right-0 p-4 bg-gradient-to-t from-black/80 to-transparent">
+                                     <p className="text-white font-medium text-sm line-clamp-2">{img.title}</p>
+                                     <div className="flex items-center gap-2 mt-2">
+                                         <span className="text-[10px] bg-white/20 backdrop-blur-md text-white px-2 py-0.5 rounded-full">AI Generated</span>
+                                     </div>
+                                 </div>
+                             </div>
+                         ))}
+                     </div>
                  </div>
-              </div>
-            </div>
-          )})}
-        </div>
-      )}
+             )}
+         </div>
+      </main>
     </div>
   );
 
+  if (currentView === 'game' && selectedPuzzle) {
+    return (
+      <GameBoard 
+        puzzle={selectedPuzzle} 
+        onExit={() => {
+            setCurrentView('home');
+            setSelectedPuzzle(null);
+        }}
+        onComplete={handlePuzzleComplete}
+      />
+    );
+  }
+
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-900 font-sans selection:bg-indigo-100">
+    <>
+      {/* Background Ambience */}
+      <div className="fixed inset-0 bg-slate-50 -z-20"></div>
+
       {currentView === 'home' && renderHome()}
       {currentView === 'gallery' && renderGallery()}
       {currentView === 'create' && renderCreate()}
-      {currentView === 'game' && selectedPuzzle && (
-        <GameBoard 
-          puzzle={selectedPuzzle} 
-          onExit={handleBack}
-          onComplete={handlePuzzleComplete}
-        />
-      )}
+      
       {showHowToPlay && renderHowToPlay()}
       {showUploadModal && renderUploadModal()}
       
-      {/* Global Error Modal */}
+      {/* Global Error Toast */}
       {error && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-900/50 backdrop-blur-sm p-4 animate-in fade-in">
-            <div className="bg-white rounded-2xl shadow-2xl p-6 max-w-xs w-full text-center animate-in zoom-in-95 duration-200">
-                <div className="w-12 h-12 bg-rose-100 text-rose-600 rounded-full flex items-center justify-center mx-auto mb-4">
-                    <AlertTriangle size={24} />
-                </div>
-                <h3 className="text-lg font-bold text-slate-800 mb-2">{error.title}</h3>
-                <p className="text-slate-500 text-sm mb-6 leading-relaxed">{error.message}</p>
-                <button 
-                    onClick={() => setError(null)}
-                    className="w-full py-3 bg-slate-900 text-white rounded-xl font-bold hover:bg-slate-800 transition-colors"
-                >
-                    Dismiss
-                </button>
-            </div>
+        <div className="fixed bottom-6 right-6 z-[100] animate-in slide-in-from-bottom-5 fade-in duration-300">
+          <div className="bg-white rounded-xl shadow-2xl border border-rose-100 p-4 flex items-start gap-3 max-w-sm">
+             <div className="bg-rose-100 text-rose-600 p-2 rounded-lg">
+                 <AlertTriangle size={20} />
+             </div>
+             <div className="flex-1">
+                 <h4 className="font-bold text-slate-800 text-sm mb-1">{error.title}</h4>
+                 <p className="text-slate-600 text-xs leading-relaxed">{error.message}</p>
+             </div>
+             <button onClick={() => setError(null)} className="text-slate-400 hover:text-slate-600">
+                 <X size={16} />
+             </button>
+          </div>
         </div>
       )}
-    </div>
+    </>
   );
 };
 
