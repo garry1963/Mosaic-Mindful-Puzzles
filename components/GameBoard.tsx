@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useRef, memo, useCallback } from 'react';
-import { X, Image as ImageIcon, Eye, Lightbulb, RotateCcw, Settings2, Home, Check } from 'lucide-react';
+import React, { useState, useEffect, useRef, memo, useCallback, useLayoutEffect } from 'react';
+import { X, Image as ImageIcon, Eye, Lightbulb, RotateCcw, Settings2, Home, Check, RotateCw } from 'lucide-react';
 import { PuzzleConfig, Piece, Difficulty, PuzzleStyle, SavedGameState } from '../types';
 import { createPuzzlePieces } from '../utils/puzzleUtils';
 import { DIFFICULTY_SETTINGS } from '../constants';
@@ -41,6 +41,7 @@ const PuzzlePieceLayer = memo(({
     onDoubleClick,
     onContextRotate, 
     hintPieceId, 
+    selectedPieceId,
     showPreview 
 }: {
     pieces: Piece[];
@@ -50,16 +51,40 @@ const PuzzlePieceLayer = memo(({
     onDoubleClick: (e: React.MouseEvent, p: Piece) => void;
     onContextRotate: (e: React.MouseEvent, id: number) => void;
     hintPieceId: number | null;
+    selectedPieceId: number | null;
     showPreview: boolean;
 }) => {
     return (
         <>
             {pieces.map((piece) => {
                 const isHintTarget = piece.id === hintPieceId;
-                // Seamless logic: Scale locked pieces slightly to overlap gaps (1.005 = 0.5% larger)
-                // Remove scaling if piece is being dragged or rotated (handled by style props in logic)
-                const scale = isHintTarget ? 'scale(1.1)' : (piece.isLocked ? 'scale(1.005)' : 'scale(1)');
+                const isSelected = piece.id === selectedPieceId && !piece.isLocked;
+
+                // Seamless logic: 
+                // 1. Locked pieces scale 1.01 (1% overlap) to seal seams.
+                // 2. Loose pieces scale 1.0 for dragging precision.
+                // 3. Hint targets scale 1.1 for visibility.
+                const scale = isHintTarget ? 'scale(1.1)' : (piece.isLocked ? 'scale(1.01)' : 'scale(1)');
                 
+                // Border Logic
+                const showBorder = isHintTarget || isSelected || !piece.isLocked;
+                let borderColor = 'rgba(255,255,255,0.8)'; // Default loose
+                let borderWidth = '1px';
+
+                if (isHintTarget) {
+                    borderColor = '#facc15'; // Yellow
+                    borderWidth = '3px';
+                } else if (isSelected) {
+                    borderColor = '#6366f1'; // Indigo (Selected)
+                    borderWidth = '3px';
+                }
+
+                // If locked, no border (seamless)
+                if (piece.isLocked) {
+                    borderColor = 'transparent';
+                    borderWidth = '0';
+                }
+
                 return (
                 <div
                     key={piece.id}
@@ -70,7 +95,7 @@ const PuzzlePieceLayer = memo(({
                     onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); onContextRotate(e, piece.id); }}
                     className={`absolute cursor-grab active:cursor-grabbing touch-none select-none ${
                         piece.isLocked ? 'z-0 transition-all duration-500 ease-out' : 'z-10'
-                    } ${isHintTarget ? 'z-50' : ''}`}
+                    } ${isHintTarget || isSelected ? 'z-50' : ''}`}
                     style={{
                         width: `${piece.width}%`,
                         height: `${piece.height}%`,
@@ -78,11 +103,10 @@ const PuzzlePieceLayer = memo(({
                         top: `${piece.currentY}%`,
                         // Initial transform only. Drag updates happen via direct DOM manipulation for 60fps
                         transform: `rotate(${piece.rotation}deg) ${scale}`,
-                        zIndex: piece.isLocked ? 1 : (isHintTarget ? 40 : 10),
+                        zIndex: piece.isLocked ? 1 : (isHintTarget || isSelected ? 40 : 10),
                         opacity: showPreview ? 0 : 1,
-                        // Optimize painting
-                        willChange: 'transform',
-                        // Disable touch callout (iOS long press menu)
+                        imageRendering: piece.isLocked ? 'pixelated' : 'auto', 
+                        willChange: piece.isLocked ? 'unset' : 'transform',
                         WebkitTouchCallout: 'none',
                     }}
                 >
@@ -100,11 +124,12 @@ const PuzzlePieceLayer = memo(({
                                 backgroundImage: `url(${puzzleSrc})`,
                                 backgroundSize: `${(100 * 100 / piece.width)}% ${(100 * 100 / piece.height)}%`,
                                 backgroundPosition: `${piece.bgX}% ${piece.bgY}%`,
-                                border: isHintTarget ? '3px solid #facc15' : (piece.isLocked ? 'none' : '1px solid rgba(255,255,255,0.6)'),
-                                // Remove box-shadow and border-radius when locked for seamless join
-                                boxShadow: piece.isLocked ? 'none' : '0 4px 6px rgba(0,0,0,0.15), 0 1px 3px rgba(0,0,0,0.1)',
-                                borderRadius: piece.isLocked ? '0' : '3px',
-                                WebkitTouchCallout: 'none'
+                                border: piece.isLocked ? 'none' : `${borderWidth} solid ${borderColor}`,
+                                boxShadow: piece.isLocked ? 'none' : '0 4px 6px rgba(0,0,0,0.2), 0 1px 3px rgba(0,0,0,0.1)',
+                                borderRadius: piece.isLocked ? '0' : '2px',
+                                boxSizing: 'border-box',
+                                WebkitTouchCallout: 'none',
+                                outline: 'none'
                             }}
                         >
                              {/* Highlight/Sheen effect only on loose pieces */}
@@ -117,7 +142,7 @@ const PuzzlePieceLayer = memo(({
                             viewBox={piece.viewBox}
                             width="100%" 
                             height="100%"
-                            style={{ overflow: 'visible', WebkitTouchCallout: 'none' }}
+                            style={{ overflow: 'visible', WebkitTouchCallout: 'none', shapeRendering: piece.isLocked ? 'crispEdges' : 'geometricPrecision' }}
                         >
                             <defs>
                                 <clipPath id={`clip-${piece.id}`}>
@@ -133,15 +158,13 @@ const PuzzlePieceLayer = memo(({
                                     clipPath={`url(#clip-${piece.id})`}
                                     style={{ pointerEvents: 'none' }} 
                                 />
-                                {!piece.isLocked && (
-                                    <path 
-                                        d={piece.pathData} 
-                                        fill="none" 
-                                        stroke={isHintTarget ? "#facc15" : "rgba(255,255,255,0.5)"}
-                                        strokeWidth={isHintTarget ? "3" : "0.5"}
-                                        vectorEffect="non-scaling-stroke"
-                                    />
-                                )}
+                                <path 
+                                    d={piece.pathData} 
+                                    fill="none" 
+                                    stroke={borderColor}
+                                    strokeWidth={piece.isLocked ? "0" : (isHintTarget || isSelected ? "3" : "0.5")}
+                                    vectorEffect="non-scaling-stroke"
+                                />
                             </g>
                         </svg>
                     )}
@@ -170,6 +193,11 @@ const GameBoard: React.FC<GameBoardProps> = ({ puzzle, onExit, onComplete }) => 
   const [isLoaded, setIsLoaded] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   
+  // Selection State (New)
+  const [selectedPieceId, setSelectedPieceId] = useState<number | null>(null);
+
+  const [boardDimensions, setBoardDimensions] = useState<{width: string, height: string}>({ width: 'min(92vw, 62vh)', height: 'min(92vw, 62vh)' });
+
   // Hint State
   const [hintsRemaining, setHintsRemaining] = useState(0);
   const [hintPieceId, setHintPieceId] = useState<number | null>(null);
@@ -181,7 +209,7 @@ const GameBoard: React.FC<GameBoardProps> = ({ puzzle, onExit, onComplete }) => 
   const boardRef = useRef<HTMLDivElement>(null);
   const pieceRefs = useRef<Record<number, HTMLDivElement | null>>({});
   
-  // Drag State (Mutable ref)
+  // Drag State
   const dragRef = useRef<{
     active: boolean;
     isSticky: boolean;
@@ -240,6 +268,28 @@ const GameBoard: React.FC<GameBoardProps> = ({ puzzle, onExit, onComplete }) => 
     }
   }, [puzzle.id]);
 
+  // Pixel Perfect Resizing
+  useLayoutEffect(() => {
+    const calculateSize = () => {
+        const settings = DIFFICULTY_SETTINGS[difficulty];
+        const vw = window.innerWidth;
+        const vh = window.innerHeight;
+        const maxSide = Math.min(vw * 0.92, vh * 0.62);
+        const cellSize = Math.floor(maxSide / settings.cols);
+        const exactSize = cellSize * settings.cols;
+        
+        setBoardDimensions({
+            width: `${exactSize}px`,
+            height: `${exactSize}px`
+        });
+    };
+
+    calculateSize();
+    const handleResize = () => requestAnimationFrame(calculateSize);
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, [difficulty]);
+
   const initializeNewGame = (diff: Difficulty, st: PuzzleStyle) => {
     const newPieces = createPuzzlePieces(diff, st);
     setPieces(newPieces);
@@ -249,6 +299,7 @@ const GameBoard: React.FC<GameBoardProps> = ({ puzzle, onExit, onComplete }) => 
     elapsedTimeRef.current = 0;
     setHintsRemaining(DIFFICULTY_SETTINGS[diff].hints);
     setHintPieceId(null);
+    setSelectedPieceId(null);
     setIsLoaded(true);
     localStorage.removeItem(`mosaic_save_${puzzle.id}`);
   };
@@ -268,7 +319,6 @@ const GameBoard: React.FC<GameBoardProps> = ({ puzzle, onExit, onComplete }) => 
     localStorage.setItem(`mosaic_save_${puzzle.id}`, JSON.stringify(saveState));
   };
 
-  // Auto-save on unmount or interval
   useEffect(() => {
       const interval = setInterval(saveGame, 5000);
       return () => {
@@ -321,12 +371,10 @@ const GameBoard: React.FC<GameBoardProps> = ({ puzzle, onExit, onComplete }) => 
       
       const { startX, startY, currentX, currentY, groupCache, visualYOffset } = dragRef.current;
       const dx = currentX - startX;
-      // Apply the visual offset here. This makes the piece appear above the finger during drag.
       const dy = (currentY - startY) + visualYOffset;
 
       for (let i = 0; i < groupCache.length; i++) {
           const item = groupCache[i];
-          // Simple direct transform
           item.el.style.transform = `translate3d(${dx}px, ${dy}px, 0) rotate(${item.rotation}deg) scale(1.1)`;
       }
       
@@ -336,7 +384,6 @@ const GameBoard: React.FC<GameBoardProps> = ({ puzzle, onExit, onComplete }) => 
   // --- Core Drag Logic ---
 
   const startDrag = (clientX: number, clientY: number, piece: Piece, isSticky: boolean, pointerType: string, event: React.PointerEvent | React.MouseEvent) => {
-    // Robust pointer capture for touch to ensure we don't lose the stream to scrolling
     if (event.target instanceof Element && 'setPointerCapture' in event.target && event.type === 'pointerdown') {
         try {
             (event.target as Element).setPointerCapture((event as React.PointerEvent).pointerId);
@@ -349,10 +396,6 @@ const GameBoard: React.FC<GameBoardProps> = ({ puzzle, onExit, onComplete }) => 
     
     const groupCache: { id: number; el: HTMLDivElement; rotation: number }[] = [];
     const startPositions: Record<number, {x: number, y: number}> = {};
-    
-    // Determine Touch Offset (Android Optimization)
-    // If it's a touch event and not sticky mode, we shift the piece up so the user can see it.
-    // -90px clears most thumbs/fingers.
     const visualYOffset = (pointerType === 'touch' && !isSticky) ? -90 : 0;
     
     groupMembers.forEach(p => {
@@ -363,10 +406,8 @@ const GameBoard: React.FC<GameBoardProps> = ({ puzzle, onExit, onComplete }) => 
             el.style.transition = 'none';
             el.style.zIndex = '100';
             el.style.boxShadow = '0 20px 30px rgba(0,0,0,0.3)'; 
-            // We apply the offset immediately in the transform so it "pops" up
             el.style.transform = `translate3d(0, ${visualYOffset}px, 0) rotate(${p.rotation}deg) scale(1.1)`;
             
-            // If sticky, set pointer events to none on the dragged pieces so clicks pass through to board
             if (isSticky) {
                 el.style.pointerEvents = 'none';
             }
@@ -391,13 +432,11 @@ const GameBoard: React.FC<GameBoardProps> = ({ puzzle, onExit, onComplete }) => 
     window.addEventListener('pointermove', handleWindowPointerMove, { passive: false });
     
     if (isSticky) {
-        // Sticky drop is handled by a separate global click listener
         setTimeout(() => {
              window.addEventListener('pointerdown', handleStickyDrop, { once: true, capture: true });
-        }, 50); // Delay slightly to avoid catching the double-click release
+        }, 50);
     } else {
         window.addEventListener('pointerup', handleWindowPointerUp);
-        // Also listen for cancel/leave just in case
         window.addEventListener('pointercancel', handleWindowPointerUp);
     }
 
@@ -412,11 +451,10 @@ const GameBoard: React.FC<GameBoardProps> = ({ puzzle, onExit, onComplete }) => 
     window.removeEventListener('pointermove', handleWindowPointerMove);
     window.removeEventListener('pointerup', handleWindowPointerUp);
     window.removeEventListener('pointercancel', handleWindowPointerUp);
-    window.removeEventListener('pointerdown', handleStickyDrop); // cleanup
+    window.removeEventListener('pointerdown', handleStickyDrop);
 
     const { startX, startY, startTime, pieceId, groupCache, startPositions, initialPieces, visualYOffset } = dragRef.current;
 
-    // Cleanup styles
     const cleanupStyles = () => {
         groupCache.forEach(item => {
             if (item.el) {
@@ -425,29 +463,36 @@ const GameBoard: React.FC<GameBoardProps> = ({ puzzle, onExit, onComplete }) => 
                 item.el.style.cursor = '';
                 item.el.style.boxShadow = '';
                 item.el.style.transition = '';
-                item.el.style.pointerEvents = ''; // Reset pointer events
+                item.el.style.pointerEvents = '';
             }
         });
     };
 
-    // Tap Detection (Only for non-sticky regular clicks)
+    // Tap/Click Detection Logic (Strict 5px threshold)
     const dist = Math.hypot(endX - startX, endY - startY);
     const time = Date.now() - startTime;
     
-    if (!wasSticky && dist < 10 && time < 300 && pieceId !== null) {
+    // If it's a quick tap without much movement (dist < 5px)
+    if (!wasSticky && dist < 5 && time < 500 && pieceId !== null) {
          cleanupStyles();
-         performRotation(pieceId);
-         return;
+         // Selection/Rotation Logic:
+         // 1. If this piece is already selected, rotate it.
+         // 2. If it's not selected, select it (do not rotate).
+         if (selectedPieceId === pieceId) {
+             performRotation(pieceId);
+         } else {
+             setSelectedPieceId(pieceId);
+         }
+         return; // Do NOT execute move logic
     }
 
-    // STRICT GRID DROP LOGIC
+    // STRICT GRID DROP LOGIC (Only runs if moved > 5px)
     const draggedPiece = initialPieces.find(p => p.id === pieceId);
     
     if (draggedPiece && boardRef.current) {
         const rect = boardRef.current.getBoundingClientRect();
         const settings = DIFFICULTY_SETTINGS[difficulty];
         
-        // Convert screen delta to percentages
         const totalDxPixels = endX - startX;
         const totalDyPixels = (endY - startY) + visualYOffset;
         
@@ -458,17 +503,12 @@ const GameBoard: React.FC<GameBoardProps> = ({ puzzle, onExit, onComplete }) => 
         const cellW = 100 / settings.cols;
         const cellH = 100 / settings.rows;
 
-        // Calculate the theoretical "center" of the piece after drag
-        // This determines which grid slot the user is hovering over
         const currentCenterX = startPos.x + deltaXPercent + draggedPiece.width / 2;
         const currentCenterY = startPos.y + deltaYPercent + draggedPiece.height / 2;
         
-        // Identify the Target Grid Slot
         const targetCol = Math.floor(currentCenterX / cellW);
         const targetRow = Math.floor(currentCenterY / cellH);
 
-        // Identify the Source Grid Slot (where the piece came from)
-        // We use the same center logic on startPos
         const startCol = Math.floor((startPos.x + draggedPiece.width / 2) / cellW);
         const startRow = Math.floor((startPos.y + draggedPiece.height / 2) / cellH);
         
@@ -477,21 +517,13 @@ const GameBoard: React.FC<GameBoardProps> = ({ puzzle, onExit, onComplete }) => 
         let targetX = startPos.x;
         let targetY = startPos.y;
         
-        // 1. Check Bounds
         if (targetCol >= 0 && targetCol < settings.cols && targetRow >= 0 && targetRow < settings.rows) {
-            
-            // 2. Calculate Precise Target CSS Coords
-            // To handle Mosaic offsets, we calculate the offset relative to the *source* cell
-            // and apply it to the *target* cell.
-            // Offset = CSS_Position - (Grid_Col * Cell_Width)
             const cellOffsetX = startPos.x - (startCol * cellW);
             const cellOffsetY = startPos.y - (startRow * cellH);
             
             const newCssX = targetCol * cellW + cellOffsetX;
             const newCssY = targetRow * cellH + cellOffsetY;
             
-            // 3. Check Occupancy
-            // We find occupancy by checking which piece's center is in the target slot
             const occupant = initialPieces.find(p => {
                 if (p.id === draggedPiece.id) return false;
                 const pCol = Math.floor((p.currentX + p.width/2) / cellW);
@@ -500,31 +532,24 @@ const GameBoard: React.FC<GameBoardProps> = ({ puzzle, onExit, onComplete }) => 
             });
 
             if (!occupant) {
-                // Empty slot -> Move there
                 validMove = true;
                 targetX = newCssX;
                 targetY = newCssY;
             } else if (!occupant.isLocked) {
-                // Occupied by loose piece -> Swap
                 validMove = true;
                 swapTargetId = occupant.id;
                 targetX = newCssX;
                 targetY = newCssY;
             } else {
-                // Occupied by locked piece -> Bounce back (Invalid)
                 validMove = false;
             }
         }
         
-        // Execute Move
         if (validMove) {
              let newPieces = [...initialPieces];
              
-             // Update Dragged Piece
              newPieces = newPieces.map(p => {
                  if (p.id === draggedPiece.id) {
-                     // Check if this new position is the "Correct" one
-                     // Snap threshold logic: if it's in the correct slot, lock it.
                      const isCorrectSlot = Math.abs(targetX - p.correctX) < settings.snapThreshold && 
                                            Math.abs(targetY - p.correctY) < settings.snapThreshold;
                      
@@ -535,10 +560,7 @@ const GameBoard: React.FC<GameBoardProps> = ({ puzzle, onExit, onComplete }) => 
                          isLocked: isCorrectSlot && p.rotation === 0
                      };
                  }
-                 // Update Swapped Piece (if any)
                  if (swapTargetId !== null && p.id === swapTargetId) {
-                     // Move occupant to the SOURCE slot
-                     // For uniform shapes, returning to startPos.x works.
                      return {
                          ...p,
                          currentX: startPos.x,
@@ -550,8 +572,12 @@ const GameBoard: React.FC<GameBoardProps> = ({ puzzle, onExit, onComplete }) => 
 
              setPieces(newPieces);
              
+             // Auto-select the piece we just moved for convenience
+             if (draggedPiece) setSelectedPieceId(draggedPiece.id);
+
              if (newPieces.every(p => p.isLocked)) {
                 setIsComplete(true);
+                setSelectedPieceId(null);
                 if (onComplete) onComplete();
             }
         }
@@ -597,12 +623,12 @@ const GameBoard: React.FC<GameBoardProps> = ({ puzzle, onExit, onComplete }) => 
   // UI Formatting
   const activeHintPiece = pieces.find(p => p.id === hintPieceId);
   const difficultyConfig = DIFFICULTY_SETTINGS[difficulty];
+  const isRotationEnabled = difficultyConfig.rotate;
 
-  // Render
   return (
     <div className="fixed inset-0 bg-slate-100 flex flex-col overflow-hidden touch-none select-none">
       
-      {/* 1. Header (Info & Exit) - Kept high and out of way */}
+      {/* 1. Header (Info & Exit) */}
       <header className="px-4 md:px-8 flex items-center justify-between z-30 bg-white/80 backdrop-blur-md border-b border-slate-200/60 shadow-sm pt-safe-top h-auto py-3">
         <button 
             onClick={onExit} 
@@ -625,7 +651,7 @@ const GameBoard: React.FC<GameBoardProps> = ({ puzzle, onExit, onComplete }) => 
         </button>
       </header>
 
-      {/* Settings Dropdown (Floating) */}
+      {/* Settings Dropdown */}
       {showSettings && (
          <div className="absolute top-20 right-4 z-50 bg-white p-4 rounded-2xl shadow-xl border border-slate-100 w-64 animate-in fade-in slide-in-from-top-4">
             <h3 className="text-sm font-bold text-slate-400 uppercase mb-3">Difficulty</h3>
@@ -648,28 +674,29 @@ const GameBoard: React.FC<GameBoardProps> = ({ puzzle, onExit, onComplete }) => 
          </div>
       )}
 
-      {/* 2. Main Game Area - Maximize Space */}
+      {/* 2. Main Game Area */}
       <div className="flex-1 relative flex items-center justify-center overflow-hidden p-4">
         
-        {/* Board Container */}
         <div 
           ref={boardRef}
           className="relative shadow-2xl shadow-indigo-900/10 bg-white rounded-lg transition-all"
           style={{
-            width: 'min(92vw, 62vh)', // Adjusted for bottom bar space
-            aspectRatio: '1/1',
-            touchAction: 'none' // Critical for browser handling
+            width: boardDimensions.width,
+            height: boardDimensions.height,
+            touchAction: 'none'
           }}
           onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); }}
+          onPointerDown={(e) => {
+              // Deselect if clicking on empty board space (background)
+              if (e.target === boardRef.current) setSelectedPieceId(null);
+          }}
         >
-            {/* Full Image Overlay on Complete (Seamless View) */}
             {isComplete && (
                 <div className="absolute inset-0 z-40 animate-in fade-in duration-1000">
                     <img src={puzzle.src} className="w-full h-full object-cover rounded-lg" alt="Completed Puzzle" />
                 </div>
             )}
 
-            {/* Grid Lines */}
             {style === 'classic' && !isComplete && (
                 <div 
                     className="absolute inset-0 pointer-events-none opacity-10"
@@ -683,7 +710,6 @@ const GameBoard: React.FC<GameBoardProps> = ({ puzzle, onExit, onComplete }) => 
                 />
             )}
 
-            {/* Ghost Image (Low Opacity Guide) */}
             {!isComplete && (
                 <div 
                     className="absolute inset-0 pointer-events-none opacity-5 grayscale"
@@ -694,7 +720,6 @@ const GameBoard: React.FC<GameBoardProps> = ({ puzzle, onExit, onComplete }) => 
                 />
             )}
 
-            {/* Hint Ghost */}
             {activeHintPiece && (
                 <div 
                     className="absolute z-40 pointer-events-none animate-pulse opacity-50"
@@ -708,7 +733,6 @@ const GameBoard: React.FC<GameBoardProps> = ({ puzzle, onExit, onComplete }) => 
                 />
             )}
 
-            {/* Pieces Layer */}
             {isLoaded && !isComplete && (
                 <PuzzlePieceLayer 
                     pieces={pieces}
@@ -718,11 +742,11 @@ const GameBoard: React.FC<GameBoardProps> = ({ puzzle, onExit, onComplete }) => 
                     onDoubleClick={handleDoubleClick}
                     onContextRotate={(e, id) => { e.preventDefault(); performRotation(id); }}
                     hintPieceId={hintPieceId}
+                    selectedPieceId={selectedPieceId}
                     showPreview={showPreview}
                 />
             )}
 
-            {/* Full Preview Overlay (Peek) */}
             <div 
                 className={`absolute inset-0 z-50 transition-all duration-300 pointer-events-none origin-center ${showPreview ? 'opacity-100 scale-100' : 'opacity-0 scale-95'}`}
                 style={{ visibility: showPreview ? 'visible' : 'hidden' }}
@@ -732,7 +756,7 @@ const GameBoard: React.FC<GameBoardProps> = ({ puzzle, onExit, onComplete }) => 
         </div>
       </div>
 
-      {/* 3. Bottom Control Dock (Thumb Zone) */}
+      {/* 3. Bottom Control Dock */}
       {!isComplete && (
       <div className="h-auto px-6 flex items-center justify-center gap-6 z-40 pointer-events-none pb-safe-bottom">
          <div className="pointer-events-auto flex items-center gap-3 bg-white/90 backdrop-blur-xl p-3 rounded-3xl shadow-2xl border border-white/40 ring-1 ring-black/5">
@@ -740,9 +764,9 @@ const GameBoard: React.FC<GameBoardProps> = ({ puzzle, onExit, onComplete }) => 
              {/* Restart */}
              <button 
                 onClick={handleRestart}
-                className="flex flex-col items-center justify-center w-20 h-16 rounded-2xl text-slate-500 hover:bg-slate-100 active:bg-slate-200 active:scale-95 transition-all"
+                className="flex flex-col items-center justify-center w-16 h-16 rounded-2xl text-slate-500 hover:bg-slate-100 active:bg-slate-200 active:scale-95 transition-all"
              >
-                <RotateCcw size={24} className="mb-1" />
+                <RotateCcw size={22} className="mb-1" />
                 <span className="text-[10px] font-bold uppercase tracking-wider">Reset</span>
              </button>
 
@@ -752,36 +776,47 @@ const GameBoard: React.FC<GameBoardProps> = ({ puzzle, onExit, onComplete }) => 
              <button 
                 onClick={handleHint}
                 disabled={hintsRemaining === 0}
-                className={`flex flex-col items-center justify-center w-20 h-16 rounded-2xl transition-all active:scale-95 ${
+                className={`flex flex-col items-center justify-center w-16 h-16 rounded-2xl transition-all active:scale-95 ${
                     hintsRemaining > 0 
                     ? 'text-amber-600 hover:bg-amber-50 active:bg-amber-100' 
                     : 'text-slate-300'
                 }`}
              >
                 <div className="relative">
-                    <Lightbulb size={24} className={`mb-1 ${hintsRemaining > 0 ? 'fill-amber-100' : ''}`} />
+                    <Lightbulb size={22} className={`mb-1 ${hintsRemaining > 0 ? 'fill-amber-100' : ''}`} />
                     <span className="absolute -top-1 -right-2 bg-amber-500 text-white text-[9px] w-4 h-4 flex items-center justify-center rounded-full font-bold">
                         {hintsRemaining}
                     </span>
                 </div>
                 <span className="text-[10px] font-bold uppercase tracking-wider">Hint</span>
              </button>
+
+             {/* Rotation Button (Visible when piece selected & rotation enabled) */}
+             {isRotationEnabled && selectedPieceId !== null && (
+                 <button 
+                    onClick={() => performRotation(selectedPieceId)}
+                    className="flex flex-col items-center justify-center w-16 h-16 rounded-2xl text-indigo-600 bg-indigo-50 hover:bg-indigo-100 active:bg-indigo-200 active:scale-95 transition-all animate-in zoom-in-50 duration-200"
+                 >
+                    <RotateCw size={22} className="mb-1" />
+                    <span className="text-[10px] font-bold uppercase tracking-wider">Rotate</span>
+                 </button>
+             )}
              
-             {/* Preview (Hold Interaction) */}
+             {/* Preview */}
              <button 
                 onPointerDown={() => setShowPreview(true)}
                 onPointerUp={() => setShowPreview(false)}
                 onPointerLeave={() => setShowPreview(false)}
-                className="flex flex-col items-center justify-center w-20 h-16 rounded-2xl text-indigo-600 hover:bg-indigo-50 active:bg-indigo-100 active:scale-95 transition-all"
+                className="flex flex-col items-center justify-center w-16 h-16 rounded-2xl text-indigo-600 hover:bg-indigo-50 active:bg-indigo-100 active:scale-95 transition-all"
              >
-                <Eye size={24} className="mb-1 fill-indigo-100" />
+                <Eye size={22} className="mb-1 fill-indigo-100" />
                 <span className="text-[10px] font-bold uppercase tracking-wider">Peek</span>
              </button>
          </div>
       </div>
       )}
 
-      {/* Completion Overlay (Bottom) */}
+      {/* Completion Overlay */}
       {isComplete && (
         <div className="absolute inset-x-0 bottom-0 z-50 flex flex-col items-center justify-end pb-8 bg-gradient-to-t from-black/80 via-transparent to-transparent animate-in fade-in duration-1000 pointer-events-none pb-safe-bottom">
            <div className="bg-white/90 backdrop-blur-md p-6 rounded-3xl shadow-2xl max-w-sm w-full text-center mx-4 mb-4 pointer-events-auto border border-white/50">
@@ -798,7 +833,6 @@ const GameBoard: React.FC<GameBoardProps> = ({ puzzle, onExit, onComplete }) => 
                  >
                     Play Again
                  </button>
-                 {/* The request asked to wait for home button, but offering a gallery button is still good UX, just not auto-redirecting */}
                  <button onClick={onExit} className="flex-1 py-3 rounded-2xl bg-slate-900 text-white font-bold hover:bg-slate-800 shadow-lg shadow-slate-900/20 transition-colors">
                     Gallery
                  </button>
