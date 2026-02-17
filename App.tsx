@@ -860,15 +860,13 @@ const App: React.FC = () => {
                                  </div>
                              )}
 
-                             {(puzzle.isUserUpload || puzzle.category === 'Discovery' || puzzle.category === 'Daily') && (
-                                 <button 
-                                    onClick={(e) => { e.stopPropagation(); handleDeletePuzzle(puzzle); }}
-                                    className="absolute top-2 left-2 bg-white/90 text-rose-500 p-1.5 rounded-full opacity-0 group-hover:opacity-100 transition-opacity hover:bg-rose-50"
-                                    title="Delete"
-                                 >
-                                     <Trash2 size={14} />
-                                 </button>
-                             )}
+                             <button 
+                                onClick={(e) => { e.stopPropagation(); handleDeletePuzzle(puzzle); }}
+                                className="absolute top-2 left-2 bg-white/90 text-rose-500 p-2 rounded-full shadow-sm opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-all hover:bg-rose-50 z-10"
+                                title="Delete"
+                             >
+                                 <Trash2 size={14} />
+                             </button>
 
                              <div className="absolute bottom-0 left-0 right-0 p-4 transform translate-y-2 group-hover:translate-y-0 transition-transform">
                                  <h3 className="text-white font-bold text-sm truncate shadow-black drop-shadow-md">{puzzle.title}</h3>
@@ -956,7 +954,7 @@ const App: React.FC = () => {
                                  
                                  <button 
                                     onClick={(e) => { e.stopPropagation(); handleDeleteGenerated(img.id); }}
-                                    className="absolute top-2 right-2 bg-white/90 text-rose-500 p-2 rounded-full opacity-0 group-hover:opacity-100 transition-all hover:bg-rose-50 shadow-sm z-10"
+                                    className="absolute top-2 right-2 bg-white/90 text-rose-500 p-2 rounded-full shadow-sm opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-all hover:bg-rose-50 z-10"
                                     title="Delete"
                                  >
                                      <Trash2 size={16} />
