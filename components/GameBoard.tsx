@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, memo, useCallback, useLayoutEffect } from 'react';
-import { X, Image as ImageIcon, Eye, Lightbulb, RotateCcw, Settings2, Home, Check, RotateCw } from 'lucide-react';
+import { X, Image as ImageIcon, Eye, Lightbulb, RotateCcw, Settings2, Home, Check } from 'lucide-react';
 import { PuzzleConfig, Piece, Difficulty, PuzzleStyle, SavedGameState } from '../types';
 import { createPuzzlePieces } from '../utils/puzzleUtils';
 import { DIFFICULTY_SETTINGS } from '../constants';
@@ -39,9 +39,7 @@ const PuzzlePieceLayer = memo(({
     pieceRefs, 
     onPointerDown, 
     onDoubleClick,
-    onContextRotate, 
     hintPieceId, 
-    selectedPieceId,
     showPreview 
 }: {
     pieces: Piece[];
@@ -49,16 +47,13 @@ const PuzzlePieceLayer = memo(({
     pieceRefs: React.MutableRefObject<Record<number, HTMLDivElement | null>>;
     onPointerDown: (e: React.PointerEvent, p: Piece) => void;
     onDoubleClick: (e: React.MouseEvent, p: Piece) => void;
-    onContextRotate: (e: React.MouseEvent, id: number) => void;
     hintPieceId: number | null;
-    selectedPieceId: number | null;
     showPreview: boolean;
 }) => {
     return (
         <>
             {pieces.map((piece) => {
                 const isHintTarget = piece.id === hintPieceId;
-                const isSelected = piece.id === selectedPieceId && !piece.isLocked;
 
                 // Seamless logic: 
                 // 1. Locked pieces scale 1.01 (1% overlap) to seal seams.
@@ -67,19 +62,15 @@ const PuzzlePieceLayer = memo(({
                 const scale = isHintTarget ? 'scale(1.1)' : (piece.isLocked ? 'scale(1.01)' : 'scale(1)');
                 
                 // Border Logic
-                const showBorder = isHintTarget || isSelected || !piece.isLocked;
+                // If locked, no border (seamless)
                 let borderColor = 'rgba(255,255,255,0.8)'; // Default loose
                 let borderWidth = '1px';
 
                 if (isHintTarget) {
                     borderColor = '#facc15'; // Yellow
                     borderWidth = '3px';
-                } else if (isSelected) {
-                    borderColor = '#6366f1'; // Indigo (Selected)
-                    borderWidth = '3px';
                 }
 
-                // If locked, no border (seamless)
                 if (piece.isLocked) {
                     borderColor = 'transparent';
                     borderWidth = '0';
@@ -92,10 +83,10 @@ const PuzzlePieceLayer = memo(({
                     draggable={false}
                     onPointerDown={(e) => onPointerDown(e, piece)}
                     onDoubleClick={(e) => onDoubleClick(e, piece)}
-                    onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); onContextRotate(e, piece.id); }}
+                    onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); }}
                     className={`absolute cursor-grab active:cursor-grabbing touch-none select-none ${
                         piece.isLocked ? 'z-0 transition-all duration-500 ease-out' : 'z-10'
-                    } ${isHintTarget || isSelected ? 'z-50' : ''}`}
+                    } ${isHintTarget ? 'z-50' : ''}`}
                     style={{
                         width: `${piece.width}%`,
                         height: `${piece.height}%`,
@@ -103,7 +94,7 @@ const PuzzlePieceLayer = memo(({
                         top: `${piece.currentY}%`,
                         // Initial transform only. Drag updates happen via direct DOM manipulation for 60fps
                         transform: `rotate(${piece.rotation}deg) ${scale}`,
-                        zIndex: piece.isLocked ? 1 : (isHintTarget || isSelected ? 40 : 10),
+                        zIndex: piece.isLocked ? 1 : (isHintTarget ? 40 : 10),
                         opacity: showPreview ? 0 : 1,
                         imageRendering: piece.isLocked ? 'pixelated' : 'auto', 
                         willChange: piece.isLocked ? 'unset' : 'transform',
@@ -162,7 +153,7 @@ const PuzzlePieceLayer = memo(({
                                     d={piece.pathData} 
                                     fill="none" 
                                     stroke={borderColor}
-                                    strokeWidth={piece.isLocked ? "0" : (isHintTarget || isSelected ? "3" : "0.5")}
+                                    strokeWidth={piece.isLocked ? "0" : (isHintTarget ? "3" : "0.5")}
                                     vectorEffect="non-scaling-stroke"
                                 />
                             </g>
@@ -193,9 +184,6 @@ const GameBoard: React.FC<GameBoardProps> = ({ puzzle, onExit, onComplete }) => 
   const [isLoaded, setIsLoaded] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   
-  // Selection State (New)
-  const [selectedPieceId, setSelectedPieceId] = useState<number | null>(null);
-
   const [boardDimensions, setBoardDimensions] = useState<{width: string, height: string}>({ width: 'min(92vw, 62vh)', height: 'min(92vw, 62vh)' });
 
   // Hint State
@@ -299,7 +287,6 @@ const GameBoard: React.FC<GameBoardProps> = ({ puzzle, onExit, onComplete }) => 
     elapsedTimeRef.current = 0;
     setHintsRemaining(DIFFICULTY_SETTINGS[diff].hints);
     setHintPieceId(null);
-    setSelectedPieceId(null);
     setIsLoaded(true);
     localStorage.removeItem(`mosaic_save_${puzzle.id}`);
   };
@@ -336,18 +323,6 @@ const GameBoard: React.FC<GameBoardProps> = ({ puzzle, onExit, onComplete }) => 
   }, [pieces, isComplete, difficulty, style, isLoaded]);
 
   // Game Logic
-  const performRotation = (pieceId: number) => {
-    if (!DIFFICULTY_SETTINGS[difficulty].rotate) return;
-    const targetPiece = pieces.find(p => p.id === pieceId);
-    if (!targetPiece || targetPiece.isLocked) return;
-    
-    setPieces(prev => prev.map(p => {
-      if (p.groupId === targetPiece.groupId && !p.isLocked) {
-         return { ...p, rotation: (p.rotation + 90) % 360 };
-      }
-      return p;
-    }));
-  };
 
   const handleHint = () => {
     if (hintsRemaining <= 0 || isComplete || hintPieceId !== null) return;
@@ -468,22 +443,14 @@ const GameBoard: React.FC<GameBoardProps> = ({ puzzle, onExit, onComplete }) => 
         });
     };
 
-    // Tap/Click Detection Logic (Strict 5px threshold)
+    // Tap Detection (Only for non-sticky regular clicks)
     const dist = Math.hypot(endX - startX, endY - startY);
     const time = Date.now() - startTime;
     
     // If it's a quick tap without much movement (dist < 5px)
     if (!wasSticky && dist < 5 && time < 500 && pieceId !== null) {
          cleanupStyles();
-         // Selection/Rotation Logic:
-         // 1. If this piece is already selected, rotate it.
-         // 2. If it's not selected, select it (do not rotate).
-         if (selectedPieceId === pieceId) {
-             performRotation(pieceId);
-         } else {
-             setSelectedPieceId(pieceId);
-         }
-         return; // Do NOT execute move logic
+         return;
     }
 
     // STRICT GRID DROP LOGIC (Only runs if moved > 5px)
@@ -572,12 +539,8 @@ const GameBoard: React.FC<GameBoardProps> = ({ puzzle, onExit, onComplete }) => 
 
              setPieces(newPieces);
              
-             // Auto-select the piece we just moved for convenience
-             if (draggedPiece) setSelectedPieceId(draggedPiece.id);
-
              if (newPieces.every(p => p.isLocked)) {
                 setIsComplete(true);
-                setSelectedPieceId(null);
                 if (onComplete) onComplete();
             }
         }
@@ -623,7 +586,6 @@ const GameBoard: React.FC<GameBoardProps> = ({ puzzle, onExit, onComplete }) => 
   // UI Formatting
   const activeHintPiece = pieces.find(p => p.id === hintPieceId);
   const difficultyConfig = DIFFICULTY_SETTINGS[difficulty];
-  const isRotationEnabled = difficultyConfig.rotate;
 
   return (
     <div className="fixed inset-0 bg-slate-100 flex flex-col overflow-hidden touch-none select-none">
@@ -686,10 +648,6 @@ const GameBoard: React.FC<GameBoardProps> = ({ puzzle, onExit, onComplete }) => 
             touchAction: 'none'
           }}
           onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); }}
-          onPointerDown={(e) => {
-              // Deselect if clicking on empty board space (background)
-              if (e.target === boardRef.current) setSelectedPieceId(null);
-          }}
         >
             {isComplete && (
                 <div className="absolute inset-0 z-40 animate-in fade-in duration-1000">
@@ -740,9 +698,7 @@ const GameBoard: React.FC<GameBoardProps> = ({ puzzle, onExit, onComplete }) => 
                     pieceRefs={pieceRefs}
                     onPointerDown={handlePointerDown}
                     onDoubleClick={handleDoubleClick}
-                    onContextRotate={(e, id) => { e.preventDefault(); performRotation(id); }}
                     hintPieceId={hintPieceId}
-                    selectedPieceId={selectedPieceId}
                     showPreview={showPreview}
                 />
             )}
@@ -790,17 +746,6 @@ const GameBoard: React.FC<GameBoardProps> = ({ puzzle, onExit, onComplete }) => 
                 </div>
                 <span className="text-[10px] font-bold uppercase tracking-wider">Hint</span>
              </button>
-
-             {/* Rotation Button (Visible when piece selected & rotation enabled) */}
-             {isRotationEnabled && selectedPieceId !== null && (
-                 <button 
-                    onClick={() => performRotation(selectedPieceId)}
-                    className="flex flex-col items-center justify-center w-16 h-16 rounded-2xl text-indigo-600 bg-indigo-50 hover:bg-indigo-100 active:bg-indigo-200 active:scale-95 transition-all animate-in zoom-in-50 duration-200"
-                 >
-                    <RotateCw size={22} className="mb-1" />
-                    <span className="text-[10px] font-bold uppercase tracking-wider">Rotate</span>
-                 </button>
-             )}
              
              {/* Preview */}
              <button 

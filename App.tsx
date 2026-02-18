@@ -492,20 +492,8 @@ const App: React.FC = () => {
                       <MousePointer2 size={20} className="text-indigo-500"/> The Basics
                   </h3>
                   <p className="text-slate-600 leading-relaxed text-lg">
-                      Drag and drop pieces to reconstruct the image. When a piece is close to its correct position (and rotation), it will <strong className="text-indigo-600">snap</strong> and lock into place.
+                      Drag and drop pieces to reconstruct the image. When a piece is close to its correct position, it will <strong className="text-indigo-600">snap</strong> and lock into place.
                   </p>
-              </section>
-              <section className="grid md:grid-cols-2 gap-6">
-                  <div className="bg-slate-50 p-6 rounded-2xl border border-slate-100">
-                       <h3 className="font-bold text-slate-800 mb-3 flex items-center gap-2">
-                          <RotateCw size={18} className="text-orange-500"/> Rotation
-                       </h3>
-                       <p className="text-slate-600">
-                          In <strong>Hard</strong> and <strong>Expert</strong> difficulties, pieces may need to be rotated.
-                          <br/><br/>
-                          Simply <strong>Tap</strong> a piece quickly to rotate it 90 degrees.
-                       </p>
-                  </div>
               </section>
               <section>
                    <h3 className="text-lg font-bold text-slate-800 mb-4">Tools & Features</h3>

@@ -156,6 +156,6 @@ export const INITIAL_PUZZLES: PuzzleConfig[] = [
 export const DIFFICULTY_SETTINGS = {
   easy: { rows: 3, cols: 3, snapThreshold: 5, rotate: false, hints: 5 },
   normal: { rows: 5, cols: 5, snapThreshold: 4, rotate: false, hints: 3 },
-  hard: { rows: 7, cols: 7, snapThreshold: 3, rotate: true, hints: 1 },
-  expert: { rows: 10, cols: 10, snapThreshold: 2, rotate: true, hints: 0 },
+  hard: { rows: 7, cols: 7, snapThreshold: 3, rotate: false, hints: 1 },
+  expert: { rows: 10, cols: 10, snapThreshold: 2, rotate: false, hints: 0 },
 };
