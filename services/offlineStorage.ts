@@ -1,5 +1,5 @@
 import { PuzzleConfig, GeneratedImage } from "../types";
-import { getImageFromDB, saveImageToDB, deleteImageFromDB } from "../utils/db";
+import { getImageFromDB, saveImageToDB, deleteImageFromDB, getBatchImagesFromDB } from "../utils/db";
 
 // Helper to generate a thumbnail blob from a source blob
 export const generateThumbnail = (sourceBlob: Blob, size: number = 300): Promise<Blob> => {
@@ -128,14 +128,16 @@ export const loadSavedGeneratedPuzzles = async (): Promise<GeneratedImage[]> => 
         if (!metaStr) return [];
 
         const metadata: Omit<GeneratedImage, 'src'>[] = JSON.parse(metaStr);
+        const ids = metadata.map(m => m.id);
+        const records = await getBatchImagesFromDB(ids);
+        
         const results: GeneratedImage[] = [];
-
-        for (const m of metadata) {
-             const record = await getImageFromDB(m.id);
-             if (record) {
-                 results.push({ ...m, src: URL.createObjectURL(record.fullBlob) });
-             }
-        }
+        metadata.forEach((m, index) => {
+            const record = records[index];
+            if (record) {
+                results.push({ ...m, src: URL.createObjectURL(record.fullBlob) });
+            }
+        });
         
         return results;
 
@@ -203,17 +205,20 @@ export const loadUserUploadedPuzzles = async (): Promise<PuzzleConfig[]> => {
         if (!metaStr) return [];
         
         const metadata: PuzzleConfig[] = JSON.parse(metaStr);
+        const ids = metadata.map(m => m.id);
+        const records = await getBatchImagesFromDB(ids);
+        
         const results: PuzzleConfig[] = [];
         
-        for (const m of metadata) {
-            const record = await getImageFromDB(m.id);
+        metadata.forEach((m, index) => {
+            const record = records[index];
             if (record) {
                 // Determine which blob to use based on context, but here we just need a valid URL
                 // We use thumb for list, full for game. Logic in app handles getFullQualityImage.
                 // We provide thumb URL initially as 'src' for Gallery performance.
                 results.push({ ...m, src: URL.createObjectURL(record.thumbBlob) });
             }
-        }
+        });
         return results;
     } catch (e) {
         console.error("Failed to load user uploads", e);

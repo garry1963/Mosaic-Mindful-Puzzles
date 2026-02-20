@@ -50,6 +50,44 @@ export const getImageFromDB = async (id: string): Promise<ImageRecord | undefine
   }
 };
 
+export const getBatchImagesFromDB = async (ids: string[]): Promise<(ImageRecord | undefined)[]> => {
+  try {
+    const db = await initDB();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(STORE_IMAGES, 'readonly');
+      const store = tx.objectStore(STORE_IMAGES);
+      const results: (ImageRecord | undefined)[] = new Array(ids.length);
+      let completed = 0;
+      let hasError = false;
+
+      if (ids.length === 0) {
+          resolve([]);
+          return;
+      }
+
+      ids.forEach((id, index) => {
+        const request = store.get(id);
+        request.onsuccess = () => {
+          results[index] = request.result;
+          completed++;
+          if (completed === ids.length) resolve(results);
+        };
+        request.onerror = () => {
+          if (!hasError) {
+             hasError = true;
+             reject(request.error);
+          }
+        };
+      });
+      
+      tx.onerror = () => reject(tx.error);
+    });
+  } catch (e) {
+    console.error("DB Batch Error", e);
+    return [];
+  }
+};
+
 export const deleteImageFromDB = async (id: string): Promise<void> => {
   const db = await initDB();
   return new Promise((resolve, reject) => {
