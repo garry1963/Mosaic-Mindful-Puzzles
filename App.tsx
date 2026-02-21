@@ -261,8 +261,27 @@ const App: React.FC = () => {
         // Load User Uploads
         const userUploads = await loadUserUploadedPuzzles();
 
-        const allPuzzles = [...INITIAL_PUZZLES, ...storedDiscoveries, ...userUploads];
+        let allPuzzles = [...INITIAL_PUZZLES, ...storedDiscoveries, ...userUploads];
         
+        // Randomize difficulty for unsolved puzzles
+        const difficulties: Difficulty[] = ['easy', 'normal', 'hard', 'expert'];
+        // We need to use the locally loaded completed set because state update is async
+        let currentCompleted = new Set<string>();
+        try {
+            const savedCompleted = localStorage.getItem('mosaic_completed_ids');
+            if (savedCompleted) {
+                currentCompleted = new Set(JSON.parse(savedCompleted));
+            }
+        } catch (e) {}
+
+        allPuzzles = allPuzzles.map(p => {
+            if (!currentCompleted.has(p.id)) {
+                const randomDiff = difficulties[Math.floor(Math.random() * difficulties.length)];
+                return { ...p, difficulty: randomDiff };
+            }
+            return p;
+        });
+
         // Filter out hidden puzzles
         setGalleryPuzzles(allPuzzles.filter(p => !hidden.has(p.id)));
     };
