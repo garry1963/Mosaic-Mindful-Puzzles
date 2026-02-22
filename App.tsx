@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Home, Puzzle, Settings, Image as ImageIcon, Sparkles, Clock, ArrowLeft, RotateCcw, Flame, Play, ChevronRight, Wand2, History, Layers, HelpCircle, X, MousePointer2, RotateCw, Shapes, Eye, Lightbulb, Zap, Check, CloudDownload, WifiOff, Activity, AlertTriangle, Upload, Plus, Trash2 } from 'lucide-react';
+import { Home, Puzzle, Settings, Image as ImageIcon, Sparkles, Clock, ArrowLeft, RotateCcw, Flame, Play, ChevronRight, Wand2, History, Layers, HelpCircle, X, MousePointer2, RotateCw, Shapes, Eye, Lightbulb, Zap, Check, CloudDownload, WifiOff, Wifi, Activity, AlertTriangle, Upload, Plus, Trash2 } from 'lucide-react';
 import GameBoard from './components/GameBoard';
 import { generateImage } from './services/geminiService';
 import { syncPuzzleImage, getFullQualityImage, saveGeneratedPuzzle, loadSavedGeneratedPuzzles, persistGeneratedMetadata, saveUserUploadedPuzzle, loadUserUploadedPuzzles, deleteUserUploadedPuzzle, deleteGeneratedPuzzle, checkImagesExistInDB } from './services/offlineStorage';
@@ -36,8 +36,22 @@ const App: React.FC = () => {
   const [syncProgress, setSyncProgress] = useState(0);
   const [isSyncing, setIsSyncing] = useState(false);
   const [hiddenPuzzleIds, setHiddenPuzzleIds] = useState<Set<string>>(new Set());
+  const [isOfflineMode, setIsOfflineMode] = useState(false);
   
   const initializationRef = useRef(false);
+
+  // Load Offline Mode Preference
+  useEffect(() => {
+      const savedOffline = localStorage.getItem('mosaic_offline_mode');
+      if (savedOffline) {
+          setIsOfflineMode(JSON.parse(savedOffline));
+      }
+  }, []);
+
+  // Save Offline Mode Preference
+  useEffect(() => {
+      localStorage.setItem('mosaic_offline_mode', JSON.stringify(isOfflineMode));
+  }, [isOfflineMode]);
 
   // Daily Streak & Puzzle State
   const [streak, setStreak] = useState(0);
@@ -802,6 +816,14 @@ const App: React.FC = () => {
           <h2 className="text-xl font-serif font-bold text-slate-800">Gallery</h2>
         </div>
         <div className="flex items-center gap-3">
+             <button
+                onClick={() => setIsOfflineMode(!isOfflineMode)}
+                className={`flex items-center gap-2 px-4 py-2 rounded-xl font-bold transition-colors text-sm border ${isOfflineMode ? 'bg-slate-800 text-white border-slate-800' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'}`}
+                title={isOfflineMode ? "Disable Offline Mode" : "Enable Offline Mode"}
+             >
+                 {isOfflineMode ? <WifiOff size={18} /> : <Wifi size={18} />}
+                 <span className="hidden md:inline">{isOfflineMode ? 'Offline Mode' : 'Online'}</span>
+             </button>
              <button 
                 onClick={() => setShowUploadModal(true)}
                 className="flex items-center gap-2 px-4 py-2 bg-indigo-50 text-indigo-600 rounded-xl font-bold hover:bg-indigo-100 transition-colors text-sm"
@@ -860,14 +882,20 @@ const App: React.FC = () => {
              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4 md:gap-6 pb-safe-bottom">
                  {galleryPuzzles
                     .filter(p => activeCategory === 'All' || p.category === activeCategory)
+                    .filter(p => {
+                        if (!isOfflineMode) return true;
+                        // In offline mode, only show puzzles that have a local thumbnail/blob
+                        return p.isUserUpload || (p.src && p.src.startsWith('blob:')) || !!thumbnails[p.id];
+                    })
                     .map(puzzle => {
                      const isCompleted = completedPuzzleIds.has(puzzle.id);
                      const displaySrc = thumbnails[puzzle.id] || puzzle.src;
+                     const isAvailableLocally = puzzle.isUserUpload || (puzzle.src && puzzle.src.startsWith('blob:')) || !!thumbnails[puzzle.id];
                      
                      return (
                          <div 
                            key={puzzle.id} 
-                           className="group relative aspect-square bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden cursor-pointer hover:shadow-lg hover:-translate-y-1 transition-all duration-300"
+                           className={`group relative aspect-square bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden cursor-pointer hover:shadow-lg hover:-translate-y-1 transition-all duration-300 ${!isAvailableLocally && isOfflineMode ? 'opacity-50 grayscale' : ''}`}
                            onClick={() => startPuzzle(puzzle)}
                          >
                              <div className="absolute inset-0 bg-slate-100">
