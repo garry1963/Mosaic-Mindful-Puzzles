@@ -34,6 +34,16 @@ export const generateThumbnail = (sourceBlob: Blob, size: number = 300): Promise
     });
 };
 
+// Batch check for existing images
+export const checkImagesExistInDB = async (ids: string[]): Promise<Set<string>> => {
+    const records = await getBatchImagesFromDB(ids);
+    const existing = new Set<string>();
+    records.forEach((r, i) => {
+        if (r) existing.add(ids[i]);
+    });
+    return existing;
+};
+
 // The "Scraper" Function
 // Checks DB first, if missing, fetches from web, generates thumbnail, saves to DB.
 export const syncPuzzleImage = async (puzzle: PuzzleConfig): Promise<{ thumbUrl: string; isLocal: boolean }> => {

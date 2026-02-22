@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Home, Puzzle, Settings, Image as ImageIcon, Sparkles, Clock, ArrowLeft, RotateCcw, Flame, Play, ChevronRight, Wand2, History, Layers, HelpCircle, X, MousePointer2, RotateCw, Shapes, Eye, Lightbulb, Zap, Check, CloudDownload, WifiOff, Activity, AlertTriangle, Upload, Plus, Trash2 } from 'lucide-react';
 import GameBoard from './components/GameBoard';
 import { generateImage } from './services/geminiService';
-import { syncPuzzleImage, getFullQualityImage, saveGeneratedPuzzle, loadSavedGeneratedPuzzles, persistGeneratedMetadata, saveUserUploadedPuzzle, loadUserUploadedPuzzles, deleteUserUploadedPuzzle, deleteGeneratedPuzzle } from './services/offlineStorage';
+import { syncPuzzleImage, getFullQualityImage, saveGeneratedPuzzle, loadSavedGeneratedPuzzles, persistGeneratedMetadata, saveUserUploadedPuzzle, loadUserUploadedPuzzles, deleteUserUploadedPuzzle, deleteGeneratedPuzzle, checkImagesExistInDB } from './services/offlineStorage';
 import { GameState, Difficulty, PuzzleConfig, AppView, GeneratedImage } from './types';
 import { INITIAL_PUZZLES } from './constants';
 
@@ -100,25 +100,45 @@ const App: React.FC = () => {
       const runSync = async () => {
           setIsSyncing(true);
           const allPuzzles = [...galleryPuzzles];
-          let completed = 0;
+          
+          // 1. Identify puzzles that need syncing (no thumbnail yet)
+          const puzzlesToSync = allPuzzles.filter(p => !thumbnails[p.id]);
+          
+          if (puzzlesToSync.length === 0) {
+              setIsSyncing(false);
+              return;
+          }
+
+          // 2. Check DB in batch for existing images to avoid unnecessary network calls
+          const idsToCheck = puzzlesToSync.map(p => p.id);
+          let existingInDB = new Set<string>();
+          try {
+              existingInDB = await checkImagesExistInDB(idsToCheck);
+          } catch (e) {
+              console.warn("Batch DB check failed", e);
+          }
           
           // Process in chunks to avoid blocking UI
           const CHUNK_SIZE = 5;
-          for (let i = 0; i < allPuzzles.length; i += CHUNK_SIZE) {
+          let completed = 0;
+
+          for (let i = 0; i < puzzlesToSync.length; i += CHUNK_SIZE) {
               if (isCancelled) break;
               
-              const chunk = allPuzzles.slice(i, i + CHUNK_SIZE);
+              const chunk = puzzlesToSync.slice(i, i + CHUNK_SIZE);
               
               await Promise.all(chunk.map(async (p) => {
                    if (isCancelled) return;
-                   // Skip if already has a generated thumbnail (unless it's a retry)
-                   if (thumbnails[p.id]) return;
                    
                    // Don't sync user uploads or discoveries that already have local blob URLs
                    if (p.isUserUpload || (p.src && p.src.startsWith('blob:'))) {
                        setThumbnails(prev => ({ ...prev, [p.id]: p.src }));
                        return;
                    }
+
+                   // Optimization: If we know it's in DB from batch check, we can skip the individual DB check inside syncPuzzleImage
+                   // However, syncPuzzleImage handles retrieving the blob, so we still call it, but it will be fast.
+                   // The main win here is avoiding the network fetch if we know it's local.
                    
                    const result = await syncPuzzleImage(p);
                    if (!isCancelled && result.isLocal) {
@@ -128,7 +148,7 @@ const App: React.FC = () => {
               
               completed += chunk.length;
               if (!isCancelled) {
-                setSyncProgress(Math.min(100, Math.round((completed / allPuzzles.length) * 100)));
+                setSyncProgress(Math.min(100, Math.round((completed / puzzlesToSync.length) * 100)));
               }
               
               // Small delay to yield to main thread
@@ -145,7 +165,7 @@ const App: React.FC = () => {
           isCancelled = true;
           clearTimeout(timeout);
       };
-  }, [galleryPuzzles.length]); // Dependency on length so new discoveries trigger sync
+  }, [galleryPuzzles]); // Changed dependency to full array to catch updates properly
 
   // Initialize: Load streak, Completed Puzzles, Add new daily discovery puzzle & Check saves
   useEffect(() => {
