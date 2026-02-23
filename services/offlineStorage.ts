@@ -1,5 +1,5 @@
 import { PuzzleConfig, GeneratedImage } from "../types";
-import { getImageFromDB, saveImageToDB, deleteImageFromDB, getBatchImagesFromDB } from "../utils/db";
+import { getImageFromDB, saveImageToDB, deleteImageFromDB, getBatchImagesFromDB, getAllImagesFromDB, ImageRecord } from "../utils/db";
 
 // Helper to generate a thumbnail blob from a source blob
 export const generateThumbnail = (sourceBlob: Blob, size: number = 300): Promise<Blob> => {
@@ -93,11 +93,11 @@ export const getFullQualityImage = async (puzzleId: string, fallbackSrc: string)
 
 // --- Generated Puzzle Storage ---
 
-export const saveGeneratedPuzzle = async (id: string, base64Data: string): Promise<string> => {
+export const saveGeneratedPuzzle = async (id: string, base64Data: string, metadata?: any): Promise<string> => {
     const response = await fetch(base64Data);
     const blob = await response.blob();
     // Save to IndexedDB (using same blob for full and thumb to ensure quality)
-    await saveImageToDB(id, blob, blob);
+    await saveImageToDB(id, blob, blob, metadata);
     return URL.createObjectURL(blob);
 };
 
@@ -187,8 +187,6 @@ export const saveUserUploadedPuzzle = async (file: File, title: string, category
     const thumbBlob = await generateThumbnail(file);
     
     // Save to DB
-    await saveImageToDB(id, file, thumbBlob);
-    
     const puzzleConfig: PuzzleConfig = {
         id,
         src: URL.createObjectURL(file), // Temporary URL for immediate use
@@ -197,6 +195,8 @@ export const saveUserUploadedPuzzle = async (file: File, title: string, category
         difficulty: 'normal',
         isUserUpload: true
     };
+    
+    await saveImageToDB(id, file, thumbBlob, puzzleConfig);
     
     // Load existing metadata
     const existingStr = localStorage.getItem('mosaic_user_uploads');
@@ -247,4 +247,62 @@ export const deleteUserUploadedPuzzle = async (id: string): Promise<void> => {
 
     // 2. Remove from DB
     await deleteImageFromDB(id);
+};
+
+// --- Database Reconciliation (Data Recovery) ---
+
+export const reconcileDatabase = async (): Promise<void> => {
+    try {
+        const allRecords = await getAllImagesFromDB();
+        if (allRecords.length === 0) return;
+
+        // 1. Recover User Uploads
+        const uploadMetaStr = localStorage.getItem('mosaic_user_uploads');
+        let uploadMetadata: PuzzleConfig[] = uploadMetaStr ? JSON.parse(uploadMetaStr) : [];
+        let uploadChanged = false;
+
+        // 2. Recover Generated Puzzles
+        const genMetaStr = localStorage.getItem('mosaic_generated_metadata');
+        let genMetadata: GeneratedImage[] = genMetaStr ? JSON.parse(genMetaStr) : [];
+        let genChanged = false;
+
+        for (const record of allRecords) {
+            if (!record.metadata) continue;
+
+            // Check if it's a user upload
+            if (record.id.startsWith('upload-')) {
+                const exists = uploadMetadata.some(m => m.id === record.id);
+                if (!exists) {
+                    // Restore metadata
+                    // Ensure src is empty string as we don't have blob URL here yet
+                    const restored: PuzzleConfig = { ...record.metadata, src: '' };
+                    uploadMetadata = [restored, ...uploadMetadata];
+                    uploadChanged = true;
+                    console.log(`Recovered orphaned upload: ${record.id}`);
+                }
+            }
+            // Check if it's a generated puzzle
+            else if (record.id.startsWith('gen-')) {
+                const exists = genMetadata.some(m => m.id === record.id);
+                if (!exists) {
+                    // Restore metadata
+                    const restored: GeneratedImage = { ...record.metadata, src: '' };
+                    genMetadata = [restored, ...genMetadata];
+                    genChanged = true;
+                    console.log(`Recovered orphaned generation: ${record.id}`);
+                }
+            }
+        }
+
+        if (uploadChanged) {
+            localStorage.setItem('mosaic_user_uploads', JSON.stringify(uploadMetadata));
+        }
+
+        if (genChanged) {
+            localStorage.setItem('mosaic_generated_metadata', JSON.stringify(genMetadata));
+        }
+
+    } catch (e) {
+        console.error("Database reconciliation failed", e);
+    }
 };

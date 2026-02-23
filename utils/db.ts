@@ -2,11 +2,12 @@ const DB_NAME = 'MosaicDB';
 const DB_VERSION = 1;
 const STORE_IMAGES = 'images';
 
-interface ImageRecord {
+export interface ImageRecord {
   id: string;
   fullBlob: Blob;
   thumbBlob: Blob;
   timestamp: number;
+  metadata?: any;
 }
 
 export const initDB = (): Promise<IDBDatabase> => {
@@ -23,15 +24,35 @@ export const initDB = (): Promise<IDBDatabase> => {
   });
 };
 
-export const saveImageToDB = async (id: string, fullBlob: Blob, thumbBlob: Blob): Promise<void> => {
+export const saveImageToDB = async (id: string, fullBlob: Blob, thumbBlob: Blob, metadata?: any): Promise<void> => {
   const db = await initDB();
   return new Promise((resolve, reject) => {
     const tx = db.transaction(STORE_IMAGES, 'readwrite');
     const store = tx.objectStore(STORE_IMAGES);
-    const request = store.put({ id, fullBlob, thumbBlob, timestamp: Date.now() });
+    const record: ImageRecord = { id, fullBlob, thumbBlob, timestamp: Date.now() };
+    if (metadata) {
+        record.metadata = metadata;
+    }
+    const request = store.put(record);
     request.onsuccess = () => resolve();
     request.onerror = () => reject(request.error);
   });
+};
+
+export const getAllImagesFromDB = async (): Promise<ImageRecord[]> => {
+    try {
+        const db = await initDB();
+        return new Promise((resolve, reject) => {
+            const tx = db.transaction(STORE_IMAGES, 'readonly');
+            const store = tx.objectStore(STORE_IMAGES);
+            const request = store.getAll();
+            request.onsuccess = () => resolve(request.result);
+            request.onerror = () => reject(request.error);
+        });
+    } catch (e) {
+        console.error("DB GetAll Error", e);
+        return [];
+    }
 };
 
 export const getImageFromDB = async (id: string): Promise<ImageRecord | undefined> => {

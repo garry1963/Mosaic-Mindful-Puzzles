@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Home, Puzzle, Settings, Image as ImageIcon, Sparkles, Clock, ArrowLeft, RotateCcw, Flame, Play, ChevronRight, Wand2, History, Layers, HelpCircle, X, MousePointer2, RotateCw, Shapes, Eye, Lightbulb, Zap, Check, CloudDownload, WifiOff, Wifi, Activity, AlertTriangle, Upload, Plus, Trash2 } from 'lucide-react';
 import GameBoard from './components/GameBoard';
 import { generateImage } from './services/geminiService';
-import { syncPuzzleImage, getFullQualityImage, saveGeneratedPuzzle, loadSavedGeneratedPuzzles, persistGeneratedMetadata, saveUserUploadedPuzzle, loadUserUploadedPuzzles, deleteUserUploadedPuzzle, deleteGeneratedPuzzle, checkImagesExistInDB } from './services/offlineStorage';
+import { syncPuzzleImage, getFullQualityImage, saveGeneratedPuzzle, loadSavedGeneratedPuzzles, persistGeneratedMetadata, saveUserUploadedPuzzle, loadUserUploadedPuzzles, deleteUserUploadedPuzzle, deleteGeneratedPuzzle, checkImagesExistInDB, reconcileDatabase } from './services/offlineStorage';
 import { GameState, Difficulty, PuzzleConfig, AppView, GeneratedImage } from './types';
 import { INITIAL_PUZZLES } from './constants';
 
@@ -76,8 +76,10 @@ const App: React.FC = () => {
 
   // Load Generated Images from IndexedDB (Migration handled in service)
   useEffect(() => {
-    loadSavedGeneratedPuzzles().then(puzzles => {
-        setGeneratedImages(puzzles);
+    reconcileDatabase().then(() => {
+        loadSavedGeneratedPuzzles().then(puzzles => {
+            setGeneratedImages(puzzles);
+        });
     });
   }, []);
 
@@ -342,14 +344,19 @@ const App: React.FC = () => {
       if (base64Image) {
         const newId = `gen-${Date.now()}`;
         
+        const metadata = {
+            id: newId,
+            src: '', // Placeholder
+            title: promptInput,
+            isAi: true
+        };
+
         // Save to IndexedDB and get Object URL
-        const objectUrl = await saveGeneratedPuzzle(newId, base64Image);
+        const objectUrl = await saveGeneratedPuzzle(newId, base64Image, metadata);
         
         const newPuzzle: GeneratedImage = {
-          id: newId,
+          ...metadata,
           src: objectUrl, // Use blob URL for display
-          title: promptInput,
-          isAi: true
         };
         
         setGeneratedImages(prev => [newPuzzle, ...prev]);
