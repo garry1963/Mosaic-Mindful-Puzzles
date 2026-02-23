@@ -449,15 +449,6 @@ const GameBoard: React.FC<GameBoardProps> = ({ puzzle, onExit, onComplete }) => 
     
     // If it's a quick tap without much movement (dist < 5px)
     if (!wasSticky && dist < 5 && time < 500 && pieceId !== null) {
-         const settings = DIFFICULTY_SETTINGS[difficulty];
-         if (settings.rotate) {
-             setPieces(prev => prev.map(p => {
-                 if (p.id === pieceId && !p.isLocked) {
-                     return { ...p, rotation: (p.rotation + 90) % 360 };
-                 }
-                 return p;
-             }));
-         }
          cleanupStyles();
          return;
     }
