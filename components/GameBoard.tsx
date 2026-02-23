@@ -3,6 +3,7 @@ import { X, Image as ImageIcon, Eye, Lightbulb, RotateCcw, Settings2, Home, Chec
 import { PuzzleConfig, Piece, Difficulty, PuzzleStyle, SavedGameState } from '../types';
 import { createPuzzlePieces } from '../utils/puzzleUtils';
 import { DIFFICULTY_SETTINGS } from '../constants';
+import { updateUserStats, formatTime } from '../services/statsService';
 
 // --- Sub-Components for Performance Isolation ---
 
@@ -183,6 +184,8 @@ const GameBoard: React.FC<GameBoardProps> = ({ puzzle, onExit, onComplete }) => 
   const [showPreview, setShowPreview] = useState(false);
   const [isLoaded, setIsLoaded] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  const [score, setScore] = useState(0);
+  const [isNewRecord, setIsNewRecord] = useState(false);
   
   const [boardDimensions, setBoardDimensions] = useState<{width: string, height: string}>({ width: 'min(92vw, 62vh)', height: 'min(92vw, 62vh)' });
 
@@ -540,6 +543,10 @@ const GameBoard: React.FC<GameBoardProps> = ({ puzzle, onExit, onComplete }) => 
              setPieces(newPieces);
              
              if (newPieces.every(p => p.isLocked)) {
+                const finalTime = elapsedTimeRef.current;
+                const result = updateUserStats(difficulty, finalTime);
+                setScore(result.score);
+                setIsNewRecord(result.isNewRecord);
                 setIsComplete(true);
                 if (onComplete) onComplete();
             }
@@ -769,7 +776,26 @@ const GameBoard: React.FC<GameBoardProps> = ({ puzzle, onExit, onComplete }) => 
                  <Check size={32} strokeWidth={4} />
               </div>
               <h2 className="text-2xl font-serif font-bold text-slate-800 mb-1">Masterpiece Complete!</h2>
-              <p className="text-slate-600 text-sm mb-6">Enjoy the view or tap the Home button to exit.</p>
+              
+              <div className="mb-6 w-full">
+                  <div className="mt-4 p-4 bg-slate-50 rounded-xl border border-slate-100">
+                      <div className="flex justify-between items-center mb-2">
+                          <span className="text-slate-500 text-xs font-bold uppercase tracking-wider">Time</span>
+                          <span className="text-slate-800 font-mono font-bold text-lg">{formatTime(elapsedTimeRef.current)}</span>
+                      </div>
+                      <div className="flex justify-between items-center">
+                          <span className="text-slate-500 text-xs font-bold uppercase tracking-wider">Score</span>
+                          <span className="text-indigo-600 font-mono font-bold text-xl">{score.toLocaleString()}</span>
+                      </div>
+                      {isNewRecord && (
+                          <div className="mt-3 text-center">
+                              <span className="inline-block bg-amber-100 text-amber-700 text-xs font-bold px-3 py-1 rounded-full animate-bounce shadow-sm border border-amber-200">
+                                  🏆 New Record!
+                              </span>
+                          </div>
+                      )}
+                  </div>
+              </div>
               
               <div className="flex gap-3">
                   <button 

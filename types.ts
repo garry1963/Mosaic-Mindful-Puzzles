@@ -55,6 +55,16 @@ export interface SavedGameState {
   lastPlayed: number;
 }
 
+export interface UserStats {
+  totalPoints: number;
+  bestTimes: {
+    easy: number | null;
+    normal: number | null;
+    hard: number | null;
+    expert: number | null;
+  };
+}
+
 export interface GameState {
   pieces: Piece[];
   startTime: number;

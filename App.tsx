@@ -3,7 +3,8 @@ import { Home, Puzzle, Settings, Image as ImageIcon, Sparkles, Clock, ArrowLeft,
 import GameBoard from './components/GameBoard';
 import { generateImage } from './services/geminiService';
 import { syncPuzzleImage, getFullQualityImage, saveGeneratedPuzzle, loadSavedGeneratedPuzzles, persistGeneratedMetadata, saveUserUploadedPuzzle, loadUserUploadedPuzzles, deleteUserUploadedPuzzle, deleteGeneratedPuzzle, checkImagesExistInDB, reconcileDatabase } from './services/offlineStorage';
-import { GameState, Difficulty, PuzzleConfig, AppView, GeneratedImage } from './types';
+import { loadUserStats, formatTime } from './services/statsService';
+import { GameState, Difficulty, PuzzleConfig, AppView, GeneratedImage, UserStats } from './types';
 import { INITIAL_PUZZLES } from './constants';
 
 const CATEGORIES = ['Classic Cars', 'Animals', 'Cats', 'Disney Characters', 'Historical Buildings', 'People', 'Abstract', 'Nature', 'Urban', 'Spring', 'Summer', 'Autumn', 'Winter', 'Indoor', 'Fine Art & Masterpieces', 'Icons & Logos', 'Movies & TV Shows', 'Album Covers', 'Abstract & Colour Gradients'];
@@ -37,8 +38,14 @@ const App: React.FC = () => {
   const [isSyncing, setIsSyncing] = useState(false);
   const [hiddenPuzzleIds, setHiddenPuzzleIds] = useState<Set<string>>(new Set());
   const [isOfflineMode, setIsOfflineMode] = useState(false);
+  const [userStats, setUserStats] = useState<UserStats>({ totalPoints: 0, bestTimes: { easy: null, normal: null, hard: null, expert: null } });
   
   const initializationRef = useRef(false);
+
+  // Load User Stats
+  useEffect(() => {
+      setUserStats(loadUserStats());
+  }, []);
 
   // Load Offline Mode Preference
   useEffect(() => {
@@ -508,6 +515,9 @@ const App: React.FC = () => {
             newCompleted.add(selectedPuzzle.id);
             setCompletedPuzzleIds(newCompleted);
             localStorage.setItem('mosaic_completed_ids', JSON.stringify(Array.from(newCompleted)));
+            
+            // Reload stats
+            setUserStats(loadUserStats());
         } catch(e) {}
      }
      
@@ -775,6 +785,38 @@ const App: React.FC = () => {
         </div>
       </div>
       )}
+
+      {/* Stats Section */}
+      <div className="mb-10 w-full">
+          <div className="bg-white rounded-[2rem] p-6 md:p-8 shadow-sm border border-slate-100">
+              <div className="flex items-center gap-3 mb-6">
+                  <div className="bg-amber-100 p-2.5 rounded-xl text-amber-600">
+                      <Activity size={24} />
+                  </div>
+                  <h2 className="text-2xl font-serif font-bold text-slate-800">Your Progress</h2>
+              </div>
+              
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6">
+                  {/* Total Points */}
+                  <div className="bg-slate-50 rounded-2xl p-5 border border-slate-100 flex flex-col justify-center items-center text-center lg:col-span-1">
+                      <span className="text-slate-500 text-xs font-bold uppercase tracking-wider mb-1">Total Score</span>
+                      <span className="text-3xl font-mono font-bold text-indigo-600">{userStats.totalPoints.toLocaleString()}</span>
+                  </div>
+
+                  {/* Best Times */}
+                  <div className="lg:col-span-4 grid grid-cols-2 md:grid-cols-4 gap-4">
+                      {(['easy', 'normal', 'hard', 'expert'] as Difficulty[]).map(diff => (
+                          <div key={diff} className="bg-slate-50 rounded-2xl p-4 border border-slate-100 flex flex-col items-center">
+                              <span className="text-slate-400 text-[10px] font-bold uppercase tracking-widest mb-2">{diff}</span>
+                              <span className={`font-mono font-bold text-lg ${userStats.bestTimes[diff] ? 'text-slate-700' : 'text-slate-300'}`}>
+                                  {formatTime(userStats.bestTimes[diff]!)}
+                              </span>
+                          </div>
+                      ))}
+                  </div>
+              </div>
+          </div>
+      </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-8 pb-10 flex-shrink-0">
         <div className="group bg-white p-8 md:p-10 rounded-[2.5rem] shadow-sm border border-slate-100 transition-all duration-300 hover:shadow-xl hover:-translate-y-1 hover:border-indigo-100 cursor-pointer relative overflow-hidden active:scale-[0.99]"
