@@ -9,6 +9,13 @@ import { INITIAL_PUZZLES } from './constants';
 
 const CATEGORIES = ['Classic Cars', 'Animals', 'Cats', 'Disney Characters', 'Historical Buildings', 'People', 'Abstract', 'Nature', 'Urban', 'Spring', 'Summer', 'Autumn', 'Winter', 'Indoor', 'Fine Art & Masterpieces', 'Icons & Logos', 'Movies & TV Shows', 'Album Covers', 'Abstract & Colour Gradients'];
 
+const DIFFICULTY_RANK: Record<string, number> = {
+  'easy': 1,
+  'normal': 2,
+  'hard': 3,
+  'expert': 4
+};
+
 const App: React.FC = () => {
   const [currentView, setCurrentView] = useState<AppView>('home');
   const [selectedPuzzle, setSelectedPuzzle] = useState<PuzzleConfig | null>(null);
@@ -928,13 +935,18 @@ const App: React.FC = () => {
 
         {/* Puzzle Grid */}
         <main className="flex-1 overflow-y-auto p-4 md:p-8 pt-16 md:pt-8 bg-slate-50 scroll-smooth custom-scrollbar">
-             <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4 md:gap-6 pb-safe-bottom">
+             <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4 md:gap-6 pb-32">
                  {galleryPuzzles
                     .filter(p => activeCategory === 'All' || p.category === activeCategory)
                     .filter(p => {
                         if (!isOfflineMode) return true;
                         // In offline mode, only show puzzles that have a local thumbnail/blob
                         return p.isUserUpload || (p.src && p.src.startsWith('blob:')) || !!thumbnails[p.id];
+                    })
+                    .sort((a, b) => {
+                        const rankA = DIFFICULTY_RANK[a.difficulty || 'normal'] || 2;
+                        const rankB = DIFFICULTY_RANK[b.difficulty || 'normal'] || 2;
+                        return rankA - rankB;
                     })
                     .map(puzzle => {
                      const isCompleted = completedPuzzleIds.has(puzzle.id);
@@ -999,7 +1011,7 @@ const App: React.FC = () => {
           <h2 className="text-xl font-serif font-bold text-slate-800">AI Studio</h2>
       </header>
       
-      <main className="flex-1 overflow-y-auto p-4 md:p-8 pb-safe-bottom custom-scrollbar">
+      <main className="flex-1 overflow-y-auto p-4 md:p-8 pb-32 custom-scrollbar">
          <div className="max-w-4xl mx-auto">
              
              <div className="bg-white rounded-3xl p-6 md:p-10 shadow-sm border border-slate-100 mb-12">
