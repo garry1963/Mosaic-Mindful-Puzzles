@@ -7,7 +7,7 @@ import { loadUserStats, formatTime } from './services/statsService';
 import { GameState, Difficulty, PuzzleConfig, AppView, GeneratedImage, UserStats } from './types';
 import { INITIAL_PUZZLES } from './constants';
 
-const CATEGORIES = ['Classic Cars', 'Animals', 'Cats', 'Disney Characters', 'Historical Buildings', 'People', 'Abstract', 'Nature', 'Urban', 'Spring', 'Summer', 'Autumn', 'Winter', 'Indoor', 'Fine Art & Masterpieces', 'Icons & Logos', 'Movies & TV Shows', 'Album Covers', 'Abstract & Colour Gradients'];
+const INITIAL_CATEGORIES = ['Classic Cars', 'Animals', 'Cats', 'Disney Characters', 'Historical Buildings', 'People', 'Abstract', 'Nature', 'Urban', 'Spring', 'Summer', 'Autumn', 'Winter', 'Indoor', 'Fine Art & Masterpieces', 'Icons & Logos', 'Movies & TV Shows', 'Album Covers', 'Abstract & Colour Gradients'];
 
 const DIFFICULTY_RANK: Record<string, number> = {
   'easy': 1,
@@ -17,6 +17,10 @@ const DIFFICULTY_RANK: Record<string, number> = {
 };
 
 const App: React.FC = () => {
+  const [categories, setCategories] = useState<string[]>(INITIAL_CATEGORIES);
+  const [showCategoryModal, setShowCategoryModal] = useState(false);
+  const [newCategoryName, setNewCategoryName] = useState('');
+
   const [currentView, setCurrentView] = useState<AppView>('home');
   const [selectedPuzzle, setSelectedPuzzle] = useState<PuzzleConfig | null>(null);
   const [generatedImages, setGeneratedImages] = useState<GeneratedImage[]>([]);
@@ -30,7 +34,7 @@ const App: React.FC = () => {
   const [showUploadModal, setShowUploadModal] = useState(false);
   const [uploadFile, setUploadFile] = useState<File | null>(null);
   const [uploadPreview, setUploadPreview] = useState<string | null>(null);
-  const [uploadCategory, setUploadCategory] = useState(CATEGORIES[0]);
+  const [uploadCategory, setUploadCategory] = useState(INITIAL_CATEGORIES[0]);
   const [uploadTitle, setUploadTitle] = useState('');
   const [isUploading, setIsUploading] = useState(false);
   
@@ -52,6 +56,17 @@ const App: React.FC = () => {
   // Load User Stats
   useEffect(() => {
       setUserStats(loadUserStats());
+      
+      // Load custom categories
+      const savedCategories = localStorage.getItem('mosaic_custom_categories');
+      if (savedCategories) {
+          try {
+              const parsed = JSON.parse(savedCategories);
+              setCategories([...INITIAL_CATEGORIES, ...parsed]);
+          } catch (e) {
+              console.error("Failed to load categories", e);
+          }
+      }
   }, []);
 
   // Load Offline Mode Preference
@@ -434,6 +449,7 @@ const App: React.FC = () => {
           setUploadFile(null);
           setUploadPreview(null);
           setUploadTitle('');
+          setUploadCategory(categories[0]);
           setActiveCategory(uploadCategory); // Switch to the category we just uploaded to
       } catch (e) {
           console.error("Upload failed", e);
@@ -513,6 +529,27 @@ const App: React.FC = () => {
     window.history.back();
   };
   
+  const handleAddCategory = () => {
+      const trimmed = newCategoryName.trim();
+      if (!trimmed) return;
+      
+      if (categories.includes(trimmed)) {
+          alert('Category already exists!');
+          return;
+      }
+      
+      const newCategories = [...categories, trimmed];
+      setCategories(newCategories);
+      
+      // Save only custom categories to storage
+      const customOnly = newCategories.filter(c => !INITIAL_CATEGORIES.includes(c));
+      localStorage.setItem('mosaic_custom_categories', JSON.stringify(customOnly));
+      
+      setNewCategoryName('');
+      setShowCategoryModal(false);
+      setActiveCategory(trimmed);
+  };
+
   const handlePuzzleComplete = () => {
      if (selectedPuzzle) {
         try {
@@ -900,7 +937,7 @@ const App: React.FC = () => {
                >
                    All Puzzles
                </button>
-               {CATEGORIES.map(cat => (
+               {categories.map(cat => (
                    <button 
                      key={cat}
                      onClick={() => setActiveCategory(cat)}
@@ -909,6 +946,13 @@ const App: React.FC = () => {
                        {cat}
                    </button>
                ))}
+               
+               <button 
+                 onClick={() => setShowCategoryModal(true)}
+                 className="w-full text-left px-4 py-3 rounded-xl font-medium text-indigo-600 hover:bg-indigo-50 flex items-center gap-2 mt-2 border border-dashed border-indigo-200"
+               >
+                   <Plus size={18} /> Add Category
+               </button>
            </div>
         </aside>
 
@@ -921,7 +965,7 @@ const App: React.FC = () => {
                 >
                     All
                 </button>
-                {CATEGORIES.map(cat => (
+                {categories.map(cat => (
                     <button 
                         key={cat}
                         onClick={() => setActiveCategory(cat)}
@@ -930,6 +974,12 @@ const App: React.FC = () => {
                         {cat}
                     </button>
                 ))}
+                <button 
+                    onClick={() => setShowCategoryModal(true)}
+                    className="px-4 py-2 rounded-full text-sm font-bold border border-dashed border-indigo-300 text-indigo-600 bg-indigo-50 flex items-center gap-1"
+                >
+                    <Plus size={14} /> New
+                </button>
             </div>
         </div>
 
@@ -1117,6 +1167,42 @@ const App: React.FC = () => {
       {showHowToPlay && renderHowToPlay()}
       {showUploadModal && renderUploadModal()}
       
+      {/* Add Category Modal */}
+      {showCategoryModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-in fade-in">
+              <div className="bg-white rounded-3xl p-6 w-full max-w-md shadow-2xl">
+                  <div className="flex justify-between items-center mb-6">
+                      <h3 className="text-xl font-serif font-bold text-slate-800">Add New Category</h3>
+                      <button onClick={() => setShowCategoryModal(false)} className="p-2 hover:bg-slate-100 rounded-full text-slate-400">
+                          <X size={20} />
+                      </button>
+                  </div>
+                  
+                  <div className="space-y-4">
+                      <div>
+                          <label className="block text-sm font-bold text-slate-500 uppercase tracking-wider mb-2">Category Name</label>
+                          <input 
+                              type="text" 
+                              value={newCategoryName}
+                              onChange={(e) => setNewCategoryName(e.target.value)}
+                              placeholder="e.g., Space, Food, Travel"
+                              className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                              autoFocus
+                          />
+                      </div>
+                      
+                      <button 
+                          onClick={handleAddCategory}
+                          disabled={!newCategoryName.trim()}
+                          className={`w-full py-3 rounded-xl font-bold transition-colors ${!newCategoryName.trim() ? 'bg-slate-100 text-slate-400' : 'bg-indigo-600 text-white hover:bg-indigo-700'}`}
+                      >
+                          Create Category
+                      </button>
+                  </div>
+              </div>
+          </div>
+      )}
+
       {/* Global Error Toast */}
       {error && (
         <div className="fixed bottom-6 right-6 z-[100] animate-in slide-in-from-bottom-5 fade-in duration-300">
