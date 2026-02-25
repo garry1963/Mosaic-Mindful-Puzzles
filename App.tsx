@@ -701,7 +701,7 @@ const App: React.FC = () => {
                              onChange={(e) => setUploadCategory(e.target.value)}
                              className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500 text-slate-800 bg-slate-50 appearance-none cursor-pointer"
                            >
-                               {CATEGORIES.map(cat => (
+                               {categories.map(cat => (
                                    <option key={cat} value={cat}>{cat}</option>
                                ))}
                            </select>
