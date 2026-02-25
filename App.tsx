@@ -929,7 +929,7 @@ const App: React.FC = () => {
 
       <div className="flex flex-1 overflow-hidden">
         {/* Categories Sidebar */}
-        <aside className="w-64 bg-white border-r border-slate-200 overflow-y-auto hidden md:block pb-safe-bottom custom-scrollbar">
+        <aside className="w-64 bg-white border-r border-slate-200 overflow-y-auto hidden md:block pb-32 custom-scrollbar">
            <div className="p-4 space-y-1">
                <button 
                  onClick={() => setActiveCategory('All')}
