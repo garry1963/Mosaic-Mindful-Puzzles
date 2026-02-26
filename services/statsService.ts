@@ -84,6 +84,25 @@ export const updateUserStats = (difficulty: Difficulty, timeSeconds: number): { 
     return { stats, score, isNewRecord };
 };
 
+export const resetBestTimes = (): UserStats => {
+    const stats = loadUserStats();
+    stats.bestTimes = {
+        easy: null,
+        normal: null,
+        hard: null,
+        expert: null
+    };
+    saveUserStats(stats);
+    return stats;
+};
+
+export const resetBestTimeForDifficulty = (difficulty: Difficulty): UserStats => {
+    const stats = loadUserStats();
+    stats.bestTimes[difficulty] = null;
+    saveUserStats(stats);
+    return stats;
+};
+
 export const formatTime = (seconds: number | null): string => {
     if (seconds === null || seconds === undefined) return '--:--';
     const mins = Math.floor(seconds / 60);

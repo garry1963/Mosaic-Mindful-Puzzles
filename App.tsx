@@ -3,7 +3,7 @@ import { Home, Puzzle, Settings, Image as ImageIcon, Sparkles, Clock, ArrowLeft,
 import GameBoard from './components/GameBoard';
 import { generateImage } from './services/geminiService';
 import { syncPuzzleImage, getFullQualityImage, saveGeneratedPuzzle, loadSavedGeneratedPuzzles, persistGeneratedMetadata, saveUserUploadedPuzzle, loadUserUploadedPuzzles, deleteUserUploadedPuzzle, deleteGeneratedPuzzle, checkImagesExistInDB, reconcileDatabase } from './services/offlineStorage';
-import { loadUserStats, formatTime } from './services/statsService';
+import { loadUserStats, formatTime, resetBestTimes, resetBestTimeForDifficulty } from './services/statsService';
 import { GameState, Difficulty, PuzzleConfig, AppView, GeneratedImage, UserStats } from './types';
 import { INITIAL_PUZZLES } from './constants';
 
@@ -550,6 +550,20 @@ const App: React.FC = () => {
       setActiveCategory(trimmed);
   };
 
+  const handleResetStats = () => {
+      if (window.confirm("Are you sure you want to reset ALL your best times? This cannot be undone.")) {
+          const newStats = resetBestTimes();
+          setUserStats(newStats);
+      }
+  };
+
+  const handleResetDifficultyStats = (difficulty: Difficulty) => {
+      if (window.confirm(`Are you sure you want to reset your best time for ${difficulty}?`)) {
+          const newStats = resetBestTimeForDifficulty(difficulty);
+          setUserStats(newStats);
+      }
+  };
+
   const handlePuzzleComplete = () => {
      if (selectedPuzzle) {
         try {
@@ -833,11 +847,20 @@ const App: React.FC = () => {
       {/* Stats Section */}
       <div className="mb-10 w-full">
           <div className="bg-white rounded-[2rem] p-6 md:p-8 shadow-sm border border-slate-100">
-              <div className="flex items-center gap-3 mb-6">
-                  <div className="bg-amber-100 p-2.5 rounded-xl text-amber-600">
-                      <Activity size={24} />
+              <div className="flex items-center justify-between mb-6">
+                  <div className="flex items-center gap-3">
+                      <div className="bg-amber-100 p-2.5 rounded-xl text-amber-600">
+                          <Activity size={24} />
+                      </div>
+                      <h2 className="text-2xl font-serif font-bold text-slate-800">Your Progress</h2>
                   </div>
-                  <h2 className="text-2xl font-serif font-bold text-slate-800">Your Progress</h2>
+                  <button 
+                    onClick={handleResetStats}
+                    className="text-slate-400 hover:text-rose-500 transition-colors p-2 rounded-full hover:bg-rose-50"
+                    title="Reset Best Times"
+                  >
+                      <RotateCcw size={20} />
+                  </button>
               </div>
               
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6">
@@ -850,10 +873,19 @@ const App: React.FC = () => {
                   {/* Best Times */}
                   <div className="lg:col-span-4 grid grid-cols-2 md:grid-cols-4 gap-4">
                       {(['easy', 'normal', 'hard', 'expert'] as Difficulty[]).map(diff => (
-                          <div key={diff} className="bg-slate-50 rounded-2xl p-4 border border-slate-100 flex flex-col items-center">
+                          <div key={diff} className="bg-slate-50 rounded-2xl p-4 border border-slate-100 flex flex-col items-center relative group">
+                              {userStats.bestTimes[diff] !== null && (
+                                  <button 
+                                    onClick={() => handleResetDifficultyStats(diff)}
+                                    className="absolute top-2 right-2 text-slate-300 hover:text-rose-500 opacity-0 group-hover:opacity-100 transition-opacity p-1"
+                                    title={`Reset ${diff} best time`}
+                                  >
+                                      <RotateCcw size={12} />
+                                  </button>
+                              )}
                               <span className="text-slate-400 text-[10px] font-bold uppercase tracking-widest mb-2">{diff}</span>
                               <span className={`font-mono font-bold text-lg ${userStats.bestTimes[diff] ? 'text-slate-700' : 'text-slate-300'}`}>
-                                  {formatTime(userStats.bestTimes[diff]!)}
+                                  {formatTime(userStats.bestTimes[diff])}
                               </span>
                           </div>
                       ))}
