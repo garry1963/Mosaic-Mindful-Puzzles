@@ -326,6 +326,20 @@ const App: React.FC = () => {
         // Load User Uploads
         const userUploads = await loadUserUploadedPuzzles();
 
+        // Sync categories from uploads
+        const uploadCategories = new Set(userUploads.map(p => p.category));
+        setCategories(prev => {
+            const newCats = new Set(prev);
+            let changed = false;
+            uploadCategories.forEach(c => {
+                if (!newCats.has(c)) {
+                    newCats.add(c);
+                    changed = true;
+                }
+            });
+            return changed ? Array.from(newCats) : prev;
+        });
+
         let allPuzzles = [...INITIAL_PUZZLES, ...storedDiscoveries, ...userUploads];
         
         // Randomize difficulty for unsolved puzzles
@@ -562,6 +576,12 @@ const App: React.FC = () => {
           const newStats = resetBestTimeForDifficulty(difficulty);
           setUserStats(newStats);
       }
+  };
+
+  const handleCheckDatabase = async () => {
+      const report = await reconcileDatabase();
+      alert(report);
+      window.location.reload();
   };
 
   const handlePuzzleComplete = () => {
@@ -948,6 +968,13 @@ const App: React.FC = () => {
              >
                  {isOfflineMode ? <WifiOff size={18} /> : <Wifi size={18} />}
                  <span className="hidden md:inline">{isOfflineMode ? 'Offline Mode' : 'Online'}</span>
+             </button>
+             <button 
+                onClick={handleCheckDatabase} 
+                className="p-2 text-slate-400 hover:text-indigo-600 transition-colors" 
+                title="Check Database Health"
+             >
+                 <Activity size={18} />
              </button>
              <button 
                 onClick={() => setShowUploadModal(true)}

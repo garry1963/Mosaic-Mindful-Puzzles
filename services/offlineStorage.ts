@@ -251,20 +251,22 @@ export const deleteUserUploadedPuzzle = async (id: string): Promise<void> => {
 
 // --- Database Reconciliation (Data Recovery) ---
 
-export const reconcileDatabase = async (): Promise<void> => {
+export const reconcileDatabase = async (): Promise<string> => {
     try {
         const allRecords = await getAllImagesFromDB();
-        if (allRecords.length === 0) return;
+        if (allRecords.length === 0) return "Database is empty.";
 
         // 1. Recover User Uploads
         const uploadMetaStr = localStorage.getItem('mosaic_user_uploads');
         let uploadMetadata: PuzzleConfig[] = uploadMetaStr ? JSON.parse(uploadMetaStr) : [];
         let uploadChanged = false;
+        let recoveredUploads = 0;
 
         // 2. Recover Generated Puzzles
         const genMetaStr = localStorage.getItem('mosaic_generated_metadata');
         let genMetadata: GeneratedImage[] = genMetaStr ? JSON.parse(genMetaStr) : [];
         let genChanged = false;
+        let recoveredGens = 0;
 
         for (const record of allRecords) {
             if (!record.metadata) continue;
@@ -278,6 +280,7 @@ export const reconcileDatabase = async (): Promise<void> => {
                     const restored: PuzzleConfig = { ...record.metadata, src: '' };
                     uploadMetadata = [restored, ...uploadMetadata];
                     uploadChanged = true;
+                    recoveredUploads++;
                     console.log(`Recovered orphaned upload: ${record.id}`);
                 }
             }
@@ -289,6 +292,7 @@ export const reconcileDatabase = async (): Promise<void> => {
                     const restored: GeneratedImage = { ...record.metadata, src: '' };
                     genMetadata = [restored, ...genMetadata];
                     genChanged = true;
+                    recoveredGens++;
                     console.log(`Recovered orphaned generation: ${record.id}`);
                 }
             }
@@ -302,7 +306,10 @@ export const reconcileDatabase = async (): Promise<void> => {
             localStorage.setItem('mosaic_generated_metadata', JSON.stringify(genMetadata));
         }
 
+        return `Database Check Complete.\nFound ${allRecords.length} records.\nRecovered ${recoveredUploads} uploads.\nRecovered ${recoveredGens} generated images.`;
+
     } catch (e) {
         console.error("Database reconciliation failed", e);
+        return `Database Check Failed: ${e}`;
     }
 };
