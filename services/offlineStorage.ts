@@ -215,13 +215,14 @@ export const loadUserUploadedPuzzles = async (): Promise<PuzzleConfig[]> => {
         if (!metaStr) return [];
         
         const metadata: PuzzleConfig[] = JSON.parse(metaStr);
-        const ids = metadata.map(m => m.id);
-        const records = await getBatchImagesFromDB(ids);
+        // Robustness fix: Instead of batch get, load all and match. 
+        // This ensures we don't miss items due to key lookup issues and is safer for recovery.
+        const allRecords = await getAllImagesFromDB();
         
         const results: PuzzleConfig[] = [];
         
-        metadata.forEach((m, index) => {
-            const record = records[index];
+        metadata.forEach(m => {
+            const record = allRecords.find(r => r.id === m.id);
             if (record) {
                 // Determine which blob to use based on context, but here we just need a valid URL
                 // We use thumb for list, full for game. Logic in app handles getFullQualityImage.
@@ -269,15 +270,27 @@ export const reconcileDatabase = async (): Promise<string> => {
         let recoveredGens = 0;
 
         for (const record of allRecords) {
-            if (!record.metadata) continue;
-
             // Check if it's a user upload
             if (record.id.startsWith('upload-')) {
                 const exists = uploadMetadata.some(m => m.id === record.id);
                 if (!exists) {
                     // Restore metadata
-                    // Ensure src is empty string as we don't have blob URL here yet
-                    const restored: PuzzleConfig = { ...record.metadata, src: '' };
+                    let restored: PuzzleConfig;
+                    
+                    if (record.metadata) {
+                        restored = { ...record.metadata, src: '' };
+                    } else {
+                        // Synthesize metadata if missing
+                        restored = {
+                            id: record.id,
+                            title: 'Recovered Puzzle',
+                            category: 'Recovered',
+                            difficulty: 'normal',
+                            isUserUpload: true,
+                            src: ''
+                        };
+                    }
+
                     uploadMetadata = [restored, ...uploadMetadata];
                     uploadChanged = true;
                     recoveredUploads++;
@@ -289,7 +302,19 @@ export const reconcileDatabase = async (): Promise<string> => {
                 const exists = genMetadata.some(m => m.id === record.id);
                 if (!exists) {
                     // Restore metadata
-                    const restored: GeneratedImage = { ...record.metadata, src: '' };
+                    let restored: GeneratedImage;
+                    
+                    if (record.metadata) {
+                         restored = { ...record.metadata, src: '' };
+                    } else {
+                        restored = {
+                            id: record.id,
+                            prompt: 'Recovered Image',
+                            src: '',
+                            timestamp: record.timestamp || Date.now()
+                        };
+                    }
+
                     genMetadata = [restored, ...genMetadata];
                     genChanged = true;
                     recoveredGens++;
@@ -306,7 +331,7 @@ export const reconcileDatabase = async (): Promise<string> => {
             localStorage.setItem('mosaic_generated_metadata', JSON.stringify(genMetadata));
         }
 
-        return `Database Check Complete.\nFound ${allRecords.length} records.\nRecovered ${recoveredUploads} uploads.\nRecovered ${recoveredGens} generated images.`;
+        return `Database Check Complete.\nFound ${allRecords.length} total records in DB.\nRecovered ${recoveredUploads} missing uploads.\nRecovered ${recoveredGens} missing generated images.\n\nYour gallery should now be up to date.`;
 
     } catch (e) {
         console.error("Database reconciliation failed", e);
