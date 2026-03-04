@@ -46,7 +46,7 @@ export const checkImagesExistInDB = async (ids: string[]): Promise<Set<string>> 
 
 // The "Scraper" Function
 // Checks DB first, if missing, fetches from web, generates thumbnail, saves to DB.
-export const syncPuzzleImage = async (puzzle: PuzzleConfig): Promise<{ thumbUrl: string; isLocal: boolean }> => {
+export const syncPuzzleImage = async (puzzle: PuzzleConfig, forceOffline: boolean = false): Promise<{ thumbUrl: string; isLocal: boolean }> => {
     try {
         // 1. Check Local DB
         const record = await getImageFromDB(puzzle.id);
@@ -60,7 +60,7 @@ export const syncPuzzleImage = async (puzzle: PuzzleConfig): Promise<{ thumbUrl:
         // 2. Scrape (Fetch) from Web
         // Note: This relies on the image source allowing CORS. 
         // Picsum and LoremFlickr generally allow this.
-        if (!navigator.onLine) {
+        if (!navigator.onLine || forceOffline) {
              return { thumbUrl: puzzle.src, isLocal: false };
         }
 

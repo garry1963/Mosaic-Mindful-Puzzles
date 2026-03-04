@@ -32,8 +32,8 @@ const App: React.FC = () => {
   
   // Upload State
   const [showUploadModal, setShowUploadModal] = useState(false);
-  const [uploadFile, setUploadFile] = useState<File | null>(null);
-  const [uploadPreview, setUploadPreview] = useState<string | null>(null);
+  const [uploadFiles, setUploadFiles] = useState<File[]>([]);
+  const [uploadPreviews, setUploadPreviews] = useState<string[]>([]);
   const [uploadCategory, setUploadCategory] = useState(INITIAL_CATEGORIES[0]);
   const [uploadTitle, setUploadTitle] = useState('');
   const [isUploading, setIsUploading] = useState(false);
@@ -58,15 +58,33 @@ const App: React.FC = () => {
   useEffect(() => {
       setUserStats(loadUserStats());
       
-      // Load custom categories
-      const savedCategories = localStorage.getItem('mosaic_custom_categories');
-      if (savedCategories) {
+      // Load Categories (New Logic: Single Source of Truth)
+      const savedAllCategories = localStorage.getItem('mosaic_all_categories');
+      if (savedAllCategories) {
           try {
-              const parsed = JSON.parse(savedCategories);
-              setCategories([...INITIAL_CATEGORIES, ...parsed]);
+              setCategories(JSON.parse(savedAllCategories));
           } catch (e) {
-              console.error("Failed to load categories", e);
+              console.error("Failed to load all categories", e);
+              setCategories(INITIAL_CATEGORIES);
           }
+      } else {
+          // Legacy Fallback: Load custom categories and merge
+          const savedCustomCategories = localStorage.getItem('mosaic_custom_categories');
+          let initialCats = [...INITIAL_CATEGORIES];
+          
+          if (savedCustomCategories) {
+              try {
+                  const parsed = JSON.parse(savedCustomCategories);
+                  initialCats = [...initialCats, ...parsed];
+              } catch (e) {
+                  console.error("Failed to load custom categories", e);
+              }
+          }
+          
+          // Deduplicate and Save
+          const uniqueCats = Array.from(new Set(initialCats));
+          setCategories(uniqueCats);
+          localStorage.setItem('mosaic_all_categories', JSON.stringify(uniqueCats));
       }
   }, []);
 
@@ -209,7 +227,7 @@ const App: React.FC = () => {
                    // However, syncPuzzleImage handles retrieving the blob, so we still call it, but it will be fast.
                    // The main win here is avoiding the network fetch if we know it's local.
                    
-                   const result = await syncPuzzleImage(p);
+                   const result = await syncPuzzleImage(p, isOfflineMode);
                    if (!isCancelled && result.isLocal) {
                        setThumbnails(prev => ({ ...prev, [p.id]: result.thumbUrl }));
                    }
@@ -234,7 +252,7 @@ const App: React.FC = () => {
           isCancelled = true;
           clearTimeout(timeout);
       };
-  }, [galleryPuzzles]); // Changed dependency to full array to catch updates properly
+  }, [galleryPuzzles, isOfflineMode]); // Changed dependency to full array to catch updates properly
 
   // Initialize: Load streak, Completed Puzzles, Add new daily discovery puzzle & Check saves
   useEffect(() => {
@@ -455,43 +473,65 @@ const App: React.FC = () => {
   };
 
   const handleUploadFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files[0]) {
-        const file = e.target.files[0];
+    if (e.target.files && e.target.files.length > 0) {
+        const files = Array.from(e.target.files);
+        const validFiles: File[] = [];
+
         // Validate Size (5MB)
-        if (file.size > 5 * 1024 * 1024) {
-            alert("File is too large. Maximum size is 5MB.");
-            return;
+        for (const file of files) {
+            if (file.size > 5 * 1024 * 1024) {
+                alert(`File "${file.name}" is too large. Maximum size is 5MB.`);
+                continue;
+            }
+            validFiles.push(file);
+        }
+
+        if (validFiles.length === 0) return;
+        
+        setUploadFiles(validFiles);
+        if (validFiles.length === 1) {
+            setUploadTitle(validFiles[0].name.split('.')[0]); // Default title for single file
+        } else {
+            setUploadTitle(''); // Clear title for multiple files
         }
         
-        setUploadFile(file);
-        setUploadTitle(file.name.split('.')[0]); // Default title
-        
-        // Create preview
-        const reader = new FileReader();
-        reader.onload = (ev) => {
-            setUploadPreview(ev.target?.result as string);
-        };
-        reader.readAsDataURL(file);
+        // Create previews
+        Promise.all(validFiles.map(file => {
+            return new Promise<string>((resolve) => {
+                const reader = new FileReader();
+                reader.onload = (ev) => resolve(ev.target?.result as string);
+                reader.readAsDataURL(file);
+            });
+        })).then(results => {
+            setUploadPreviews(results);
+        });
     }
   };
 
   const handleUploadSubmit = async () => {
-      if (!uploadFile || !uploadCategory) return;
+      if (uploadFiles.length === 0 || !uploadCategory) return;
       setIsUploading(true);
       try {
-          const newPuzzle = await saveUserUploadedPuzzle(uploadFile, uploadTitle || 'Untitled', uploadCategory);
-          setGalleryPuzzles(prev => [newPuzzle, ...prev]);
+          const newPuzzles: PuzzleConfig[] = [];
+          
+          for (const file of uploadFiles) {
+              const title = uploadFiles.length === 1 && uploadTitle ? uploadTitle : file.name.split('.')[0];
+              const newPuzzle = await saveUserUploadedPuzzle(file, title, uploadCategory);
+              newPuzzles.push(newPuzzle);
+          }
+
+          setGalleryPuzzles(prev => [...newPuzzles, ...prev]);
           
           // Reset and Close
           setShowUploadModal(false);
-          setUploadFile(null);
-          setUploadPreview(null);
+          setUploadFiles([]);
+          setUploadPreviews([]);
           setUploadTitle('');
           setUploadCategory(categories[0]);
           setActiveCategory(uploadCategory); // Switch to the category we just uploaded to
       } catch (e) {
           console.error("Upload failed", e);
-          setError({ title: "Upload Failed", message: "Could not save your image. Please try again." });
+          setError({ title: "Upload Failed", message: "Could not save your image(s). Please try again." });
       } finally {
           setIsUploading(false);
       }
@@ -550,6 +590,12 @@ const App: React.FC = () => {
     // Check if we have a high-res local version
     const localSrc = await getFullQualityImage(puzzle.id, puzzle.src);
     
+    const isLocal = localSrc.startsWith('blob:') || localSrc.startsWith('data:');
+    if (isOfflineMode && !isLocal) {
+         alert("This puzzle is not available offline. Please connect to the internet to play it.");
+         return;
+    }
+
     // Create a modified puzzle config with the local source
     const puzzleToStart = { ...puzzle, src: localSrc };
 
@@ -579,13 +625,33 @@ const App: React.FC = () => {
       const newCategories = [...categories, trimmed];
       setCategories(newCategories);
       
-      // Save only custom categories to storage
+      // Save all categories to storage
+      localStorage.setItem('mosaic_all_categories', JSON.stringify(newCategories));
+      
+      // Legacy support
       const customOnly = newCategories.filter(c => !INITIAL_CATEGORIES.includes(c));
       localStorage.setItem('mosaic_custom_categories', JSON.stringify(customOnly));
       
       setNewCategoryName('');
       setShowCategoryModal(false);
       setActiveCategory(trimmed);
+  };
+
+  const handleDeleteCategory = (e: React.MouseEvent, categoryToDelete: string) => {
+      e.stopPropagation();
+      if (window.confirm(`Delete category "${categoryToDelete}"?`)) {
+          const newCategories = categories.filter(c => c !== categoryToDelete);
+          setCategories(newCategories);
+          localStorage.setItem('mosaic_all_categories', JSON.stringify(newCategories));
+          
+          // Legacy support
+          const customOnly = newCategories.filter(c => !INITIAL_CATEGORIES.includes(c));
+          localStorage.setItem('mosaic_custom_categories', JSON.stringify(customOnly));
+
+          if (activeCategory === categoryToDelete) {
+              setActiveCategory('All');
+          }
+      }
   };
 
   const handleResetStats = () => {
@@ -722,35 +788,53 @@ const App: React.FC = () => {
                          accept="image/jpeg, image/png, image/webp"
                          onChange={handleUploadFileSelect}
                          className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
+                         multiple
                        />
-                       <div className={`border-2 border-dashed rounded-2xl p-8 flex flex-col items-center justify-center text-center transition-colors ${uploadPreview ? 'border-indigo-200 bg-indigo-50/30' : 'border-slate-200 hover:border-indigo-400 hover:bg-slate-50'}`}>
-                           {uploadPreview ? (
-                               <div className="relative w-full aspect-square md:aspect-video rounded-lg overflow-hidden shadow-sm">
-                                   <img src={uploadPreview} alt="Preview" className="w-full h-full object-cover" />
+                       <div className={`border-2 border-dashed rounded-2xl p-8 flex flex-col items-center justify-center text-center transition-colors ${uploadPreviews.length > 0 ? 'border-indigo-200 bg-indigo-50/30' : 'border-slate-200 hover:border-indigo-400 hover:bg-slate-50'}`}>
+                           {uploadPreviews.length > 0 ? (
+                               <div className="grid grid-cols-2 md:grid-cols-3 gap-2 w-full">
+                                   {uploadPreviews.slice(0, 6).map((preview, idx) => (
+                                       <div key={idx} className="relative w-full aspect-square rounded-lg overflow-hidden shadow-sm">
+                                           <img src={preview} alt={`Preview ${idx}`} className="w-full h-full object-cover" />
+                                       </div>
+                                   ))}
+                                   {uploadPreviews.length > 6 && (
+                                       <div className="flex items-center justify-center text-xs text-slate-500 font-medium">
+                                           +{uploadPreviews.length - 6} more
+                                       </div>
+                                   )}
                                </div>
                            ) : (
                                <>
                                    <div className="w-12 h-12 bg-indigo-50 text-indigo-500 rounded-full flex items-center justify-center mb-3">
                                        <Plus size={24} />
                                    </div>
-                                   <p className="font-medium text-slate-700">Click to choose an image</p>
+                                   <p className="font-medium text-slate-700">Click to choose image(s)</p>
                                    <p className="text-sm text-slate-400 mt-1">JPEG, PNG, WebP (Max 5MB)</p>
                                </>
                            )}
                        </div>
                    </div>
 
-                   {/* Title Input */}
-                   <div>
-                       <label className="block text-sm font-bold text-slate-700 mb-2">Title</label>
-                       <input 
-                         type="text" 
-                         value={uploadTitle}
-                         onChange={(e) => setUploadTitle(e.target.value)}
-                         placeholder="My Custom Puzzle"
-                         className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500 text-slate-800 bg-slate-50"
-                       />
-                   </div>
+                   {/* Title Input (Only for single file) */}
+                   {uploadFiles.length <= 1 && (
+                       <div>
+                           <label className="block text-sm font-bold text-slate-700 mb-2">Title</label>
+                           <input 
+                             type="text" 
+                             value={uploadTitle}
+                             onChange={(e) => setUploadTitle(e.target.value)}
+                             placeholder="My Custom Puzzle"
+                             className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500 text-slate-800 bg-slate-50"
+                           />
+                       </div>
+                   )}
+                   
+                   {uploadFiles.length > 1 && (
+                       <div className="text-sm text-slate-500 italic">
+                           Uploading {uploadFiles.length} images. Filenames will be used as titles.
+                       </div>
+                   )}
 
                    {/* Category Dropdown */}
                    <div>
@@ -779,7 +863,7 @@ const App: React.FC = () => {
                    </button>
                    <button 
                      onClick={handleUploadSubmit}
-                     disabled={!uploadFile || isUploading}
+                     disabled={uploadFiles.length === 0 || isUploading}
                      className={`px-8 py-3 bg-indigo-600 text-white rounded-xl font-bold hover:bg-indigo-700 transition-colors shadow-lg shadow-indigo-200 flex items-center gap-2 ${isUploading ? 'opacity-70 cursor-wait' : ''}`}
                    >
                        {isUploading ? 'Saving...' : 'Add to Library'}
@@ -1035,13 +1119,21 @@ const App: React.FC = () => {
                    All Puzzles
                </button>
                {categories.map(cat => (
-                   <button 
-                     key={cat}
-                     onClick={() => setActiveCategory(cat)}
-                     className={`w-full text-left px-4 py-3 rounded-xl font-medium transition-colors ${activeCategory === cat ? 'bg-indigo-50 text-indigo-700' : 'text-slate-600 hover:bg-slate-50'}`}
-                   >
-                       {cat}
-                   </button>
+                   <div key={cat} className="group relative">
+                       <button 
+                         onClick={() => setActiveCategory(cat)}
+                         className={`w-full text-left px-4 py-3 rounded-xl font-medium transition-colors pr-10 ${activeCategory === cat ? 'bg-indigo-50 text-indigo-700' : 'text-slate-600 hover:bg-slate-50'}`}
+                       >
+                           {cat}
+                       </button>
+                       <button
+                           onClick={(e) => handleDeleteCategory(e, cat)}
+                           className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 text-slate-400 hover:text-rose-500 hover:bg-rose-50 rounded-lg opacity-0 group-hover:opacity-100 transition-all"
+                           title="Delete Category"
+                       >
+                           <Trash2 size={14} />
+                       </button>
+                   </div>
                ))}
                
                <button 
@@ -1066,9 +1158,18 @@ const App: React.FC = () => {
                     <button 
                         key={cat}
                         onClick={() => setActiveCategory(cat)}
-                        className={`px-4 py-2 rounded-full text-sm font-bold border transition-colors ${activeCategory === cat ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-slate-600 border-slate-200'}`}
+                        className={`px-4 py-2 rounded-full text-sm font-bold border transition-colors flex items-center gap-2 ${activeCategory === cat ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-slate-600 border-slate-200'}`}
                     >
                         {cat}
+                        {activeCategory === cat && (
+                            <span 
+                                onClick={(e) => handleDeleteCategory(e, cat)}
+                                className="p-1 bg-white/20 rounded-full hover:bg-white/40 transition-colors"
+                                title="Delete Category"
+                            >
+                                <X size={12} />
+                            </span>
+                        )}
                     </button>
                 ))}
                 <button 
