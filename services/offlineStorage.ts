@@ -60,6 +60,10 @@ export const syncPuzzleImage = async (puzzle: PuzzleConfig): Promise<{ thumbUrl:
         // 2. Scrape (Fetch) from Web
         // Note: This relies on the image source allowing CORS. 
         // Picsum and LoremFlickr generally allow this.
+        if (!navigator.onLine) {
+             return { thumbUrl: puzzle.src, isLocal: false };
+        }
+
         const response = await fetch(puzzle.src, { mode: 'cors' });
         if (!response.ok) throw new Error('Network response was not ok');
         
@@ -138,12 +142,12 @@ export const loadSavedGeneratedPuzzles = async (): Promise<GeneratedImage[]> => 
         if (!metaStr) return [];
 
         const metadata: Omit<GeneratedImage, 'src'>[] = JSON.parse(metaStr);
-        const ids = metadata.map(m => m.id);
-        const records = await getBatchImagesFromDB(ids);
+        // Robustness fix: Load all to ensure matching
+        const allRecords = await getAllImagesFromDB();
         
         const results: GeneratedImage[] = [];
-        metadata.forEach((m, index) => {
-            const record = records[index];
+        metadata.forEach(m => {
+            const record = allRecords.find(r => r.id === m.id);
             if (record) {
                 results.push({ ...m, src: URL.createObjectURL(record.fullBlob) });
             }
@@ -252,89 +256,79 @@ export const deleteUserUploadedPuzzle = async (id: string): Promise<void> => {
 
 // --- Database Reconciliation (Data Recovery) ---
 
-export const reconcileDatabase = async (): Promise<string> => {
+export const rebuildDatabase = async (): Promise<string> => {
     try {
         const allRecords = await getAllImagesFromDB();
-        if (allRecords.length === 0) return "Database is empty.";
+        if (allRecords.length === 0) return "Database is empty. Nothing to recover.";
 
-        // 1. Recover User Uploads
-        const uploadMetaStr = localStorage.getItem('mosaic_user_uploads');
-        let uploadMetadata: PuzzleConfig[] = uploadMetaStr ? JSON.parse(uploadMetaStr) : [];
-        let uploadChanged = false;
-        let recoveredUploads = 0;
-
-        // 2. Recover Generated Puzzles
-        const genMetaStr = localStorage.getItem('mosaic_generated_metadata');
-        let genMetadata: GeneratedImage[] = genMetaStr ? JSON.parse(genMetaStr) : [];
-        let genChanged = false;
-        let recoveredGens = 0;
+        const newUploads: PuzzleConfig[] = [];
+        const newGens: GeneratedImage[] = [];
+        let recoveredCount = 0;
 
         for (const record of allRecords) {
-            // Check if it's a user upload
+            // 1. Handle User Uploads
             if (record.id.startsWith('upload-')) {
-                const exists = uploadMetadata.some(m => m.id === record.id);
-                if (!exists) {
-                    // Restore metadata
-                    let restored: PuzzleConfig;
-                    
-                    if (record.metadata) {
-                        restored = { ...record.metadata, src: '' };
-                    } else {
-                        // Synthesize metadata if missing
-                        restored = {
-                            id: record.id,
-                            title: 'Recovered Puzzle',
-                            category: 'Recovered',
-                            difficulty: 'normal',
-                            isUserUpload: true,
-                            src: ''
-                        };
-                    }
-
-                    uploadMetadata = [restored, ...uploadMetadata];
-                    uploadChanged = true;
-                    recoveredUploads++;
-                    console.log(`Recovered orphaned upload: ${record.id}`);
+                let restored: PuzzleConfig;
+                if (record.metadata && record.metadata.title) {
+                    restored = { ...record.metadata, src: '' };
+                    if (!restored.category) restored.category = 'Recovered';
+                } else {
+                    restored = {
+                        id: record.id,
+                        title: 'Recovered Puzzle',
+                        category: 'Recovered',
+                        difficulty: 'normal',
+                        isUserUpload: true,
+                        src: ''
+                    };
                 }
+                newUploads.push(restored);
+                recoveredCount++;
             }
-            // Check if it's a generated puzzle
+            // 2. Handle Generated Images
             else if (record.id.startsWith('gen-')) {
-                const exists = genMetadata.some(m => m.id === record.id);
-                if (!exists) {
-                    // Restore metadata
-                    let restored: GeneratedImage;
-                    
-                    if (record.metadata) {
-                         restored = { ...record.metadata, src: '' };
-                    } else {
-                        restored = {
-                            id: record.id,
-                            prompt: 'Recovered Image',
-                            src: '',
-                            timestamp: record.timestamp || Date.now()
-                        };
-                    }
-
-                    genMetadata = [restored, ...genMetadata];
-                    genChanged = true;
-                    recoveredGens++;
-                    console.log(`Recovered orphaned generation: ${record.id}`);
+                let restored: GeneratedImage;
+                if (record.metadata && record.metadata.prompt) {
+                    restored = { ...record.metadata, src: '' };
+                } else {
+                    restored = {
+                        id: record.id,
+                        prompt: 'Recovered Image',
+                        src: '',
+                        timestamp: record.timestamp || Date.now()
+                    };
                 }
+                newGens.push(restored);
+                recoveredCount++;
             }
         }
 
-        if (uploadChanged) {
-            localStorage.setItem('mosaic_user_uploads', JSON.stringify(uploadMetadata));
+        // Force overwrite metadata with what we found in DB
+        localStorage.setItem('mosaic_user_uploads', JSON.stringify(newUploads));
+        localStorage.setItem('mosaic_generated_metadata', JSON.stringify(newGens));
+
+        // Sync Categories immediately
+        const existingCatsStr = localStorage.getItem('mosaic_custom_categories');
+        const existingCats: string[] = existingCatsStr ? JSON.parse(existingCatsStr) : [];
+        const newCats = new Set(existingCats);
+        let catsChanged = false;
+        
+        newUploads.forEach(p => {
+            if (p.category && !newCats.has(p.category)) {
+                newCats.add(p.category);
+                catsChanged = true;
+            }
+        });
+
+        if (catsChanged) {
+            localStorage.setItem('mosaic_custom_categories', JSON.stringify(Array.from(newCats)));
         }
 
-        if (genChanged) {
-            localStorage.setItem('mosaic_generated_metadata', JSON.stringify(genMetadata));
-        }
-
-        return `Database Check Complete.\nFound ${allRecords.length} total records in DB.\nRecovered ${recoveredUploads} missing uploads.\nRecovered ${recoveredGens} missing generated images.\n\nYour gallery should now be up to date.`;
+        return `Database Rebuilt Successfully.\n\nSynced ${newUploads.length} uploads.\nSynced ${newGens.length} generated images.\nTotal records: ${recoveredCount}`;
 
     } catch (e) {
-        console.error("Database reconciliation failed", e);
-        return `Database Check Failed: ${e}`;
+        console.error("Database rebuild failed", e);
+        return `Database Rebuild Failed: ${e}`;
     }
 };
+

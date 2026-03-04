@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Home, Puzzle, Settings, Image as ImageIcon, Sparkles, Clock, ArrowLeft, RotateCcw, Flame, Play, ChevronRight, Wand2, History, Layers, HelpCircle, X, MousePointer2, RotateCw, Shapes, Eye, Lightbulb, Zap, Check, CloudDownload, WifiOff, Wifi, Activity, AlertTriangle, Upload, Plus, Trash2 } from 'lucide-react';
 import GameBoard from './components/GameBoard';
 import { generateImage } from './services/geminiService';
-import { syncPuzzleImage, getFullQualityImage, saveGeneratedPuzzle, loadSavedGeneratedPuzzles, persistGeneratedMetadata, saveUserUploadedPuzzle, loadUserUploadedPuzzles, deleteUserUploadedPuzzle, deleteGeneratedPuzzle, checkImagesExistInDB, reconcileDatabase } from './services/offlineStorage';
+import { syncPuzzleImage, getFullQualityImage, saveGeneratedPuzzle, loadSavedGeneratedPuzzles, persistGeneratedMetadata, saveUserUploadedPuzzle, loadUserUploadedPuzzles, deleteUserUploadedPuzzle, deleteGeneratedPuzzle, checkImagesExistInDB, rebuildDatabase } from './services/offlineStorage';
 import { loadUserStats, formatTime, resetBestTimes, resetBestTimeForDifficulty } from './services/statsService';
 import { GameState, Difficulty, PuzzleConfig, AppView, GeneratedImage, UserStats } from './types';
 import { INITIAL_PUZZLES } from './constants';
@@ -49,6 +49,7 @@ const App: React.FC = () => {
   const [isSyncing, setIsSyncing] = useState(false);
   const [hiddenPuzzleIds, setHiddenPuzzleIds] = useState<Set<string>>(new Set());
   const [isOfflineMode, setIsOfflineMode] = useState(false);
+  const [isNetworkOffline, setIsNetworkOffline] = useState(!navigator.onLine);
   const [userStats, setUserStats] = useState<UserStats>({ totalPoints: 0, bestTimes: { easy: null, normal: null, hard: null, expert: null } });
   
   const initializationRef = useRef(false);
@@ -82,6 +83,29 @@ const App: React.FC = () => {
       localStorage.setItem('mosaic_offline_mode', JSON.stringify(isOfflineMode));
   }, [isOfflineMode]);
 
+  // Network Status Listener
+  useEffect(() => {
+      const handleOnline = () => setIsNetworkOffline(false);
+      const handleOffline = () => {
+          setIsNetworkOffline(true);
+          setIsOfflineMode(true);
+      };
+
+      window.addEventListener('online', handleOnline);
+      window.addEventListener('offline', handleOffline);
+
+      // Initial check
+      if (!navigator.onLine) {
+          setIsNetworkOffline(true);
+          setIsOfflineMode(true);
+      }
+
+      return () => {
+          window.removeEventListener('online', handleOnline);
+          window.removeEventListener('offline', handleOffline);
+      };
+  }, []);
+
   // Daily Streak & Puzzle State
   const [streak, setStreak] = useState(0);
   const [dailyPuzzle, setDailyPuzzle] = useState<PuzzleConfig | null>(null);
@@ -105,7 +129,7 @@ const App: React.FC = () => {
 
   // Load Generated Images from IndexedDB (Migration handled in service)
   useEffect(() => {
-    reconcileDatabase().then(() => {
+    rebuildDatabase().then(() => {
         loadSavedGeneratedPuzzles().then(puzzles => {
             setGeneratedImages(puzzles);
         });
@@ -579,9 +603,11 @@ const App: React.FC = () => {
   };
 
   const handleCheckDatabase = async () => {
-      const report = await reconcileDatabase();
-      alert(report);
-      window.location.reload();
+      if (window.confirm("This will scan your entire database and rebuild your gallery. It may take a moment. Continue?")) {
+          const report = await rebuildDatabase();
+          alert(report);
+          window.location.reload();
+      }
   };
 
   const handlePuzzleComplete = () => {
@@ -931,8 +957,14 @@ const App: React.FC = () => {
           </div>
         </div>
 
-        <div className="group bg-white p-8 md:p-10 rounded-[2.5rem] shadow-sm border border-slate-100 transition-all duration-300 hover:shadow-xl hover:-translate-y-1 hover:border-emerald-100 cursor-pointer relative overflow-hidden active:scale-[0.99]"
-             onClick={() => navigateToView('create')}>
+        <div className={`group bg-white p-8 md:p-10 rounded-[2.5rem] shadow-sm border border-slate-100 transition-all duration-300 relative overflow-hidden ${isOfflineMode ? 'opacity-50 grayscale cursor-not-allowed' : 'hover:shadow-xl hover:-translate-y-1 hover:border-emerald-100 cursor-pointer active:scale-[0.99]'}`}
+             onClick={() => {
+                 if (isOfflineMode) {
+                     alert("AI Generation is not available in offline mode.");
+                     return;
+                 }
+                 navigateToView('create');
+             }}>
           <div className="absolute top-0 right-0 p-8 opacity-5 group-hover:opacity-10 transition-opacity transform group-hover:scale-110 duration-700">
               <Sparkles size={140} />
           </div>
@@ -962,17 +994,23 @@ const App: React.FC = () => {
         </div>
         <div className="flex items-center gap-3">
              <button
-                onClick={() => setIsOfflineMode(!isOfflineMode)}
-                className={`flex items-center gap-2 px-4 py-2 rounded-xl font-bold transition-colors text-sm border ${isOfflineMode ? 'bg-slate-800 text-white border-slate-800' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'}`}
-                title={isOfflineMode ? "Disable Offline Mode" : "Enable Offline Mode"}
+                onClick={() => {
+                    if (isNetworkOffline) {
+                        alert("You are currently offline. Please check your internet connection.");
+                        return;
+                    }
+                    setIsOfflineMode(!isOfflineMode);
+                }}
+                className={`flex items-center gap-2 px-4 py-2 rounded-xl font-bold transition-colors text-sm border ${isNetworkOffline ? 'bg-rose-50 text-rose-600 border-rose-200 cursor-not-allowed' : (isOfflineMode ? 'bg-slate-800 text-white border-slate-800' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50')}`}
+                title={isNetworkOffline ? "No Internet Connection" : (isOfflineMode ? "Disable Offline Mode" : "Enable Offline Mode")}
              >
-                 {isOfflineMode ? <WifiOff size={18} /> : <Wifi size={18} />}
-                 <span className="hidden md:inline">{isOfflineMode ? 'Offline Mode' : 'Online'}</span>
+                 {isNetworkOffline ? <WifiOff size={18} /> : (isOfflineMode ? <WifiOff size={18} /> : <Wifi size={18} />)}
+                 <span className="hidden md:inline">{isNetworkOffline ? 'No Connection' : (isOfflineMode ? 'Offline Mode' : 'Online')}</span>
              </button>
              <button 
                 onClick={handleCheckDatabase} 
                 className="p-2 text-slate-400 hover:text-indigo-600 transition-colors" 
-                title="Check Database Health"
+                title="Repair Database & Recover Images"
              >
                  <Activity size={18} />
              </button>
