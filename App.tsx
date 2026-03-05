@@ -51,6 +51,7 @@ const App: React.FC = () => {
   const [isOfflineMode, setIsOfflineMode] = useState(false);
   const [isNetworkOffline, setIsNetworkOffline] = useState(!navigator.onLine);
   const [userStats, setUserStats] = useState<UserStats>({ totalPoints: 0, bestTimes: { easy: null, normal: null, hard: null, expert: null } });
+  const [isInitializing, setIsInitializing] = useState(true);
   
   const initializationRef = useRef(false);
 
@@ -145,14 +146,7 @@ const App: React.FC = () => {
       }
   };
 
-  // Load Generated Images from IndexedDB (Migration handled in service)
-  useEffect(() => {
-    rebuildDatabase().then(() => {
-        loadSavedGeneratedPuzzles().then(puzzles => {
-            setGeneratedImages(puzzles);
-        });
-    });
-  }, []);
+
 
   // Persist Metadata only (no base64) when state changes
   useEffect(() => {
@@ -254,163 +248,181 @@ const App: React.FC = () => {
       };
   }, [galleryPuzzles, isOfflineMode]); // Changed dependency to full array to catch updates properly
 
-  // Initialize: Load streak, Completed Puzzles, Add new daily discovery puzzle & Check saves
+  // Initialize Application
   useEffect(() => {
-    // 0. Check Saves
-    checkForSavedGames();
+    if (initializationRef.current) return;
+    initializationRef.current = true;
 
-    // 0.5 Load Completed Puzzles
-    try {
-        const savedCompleted = localStorage.getItem('mosaic_completed_ids');
-        if (savedCompleted) {
-            setCompletedPuzzleIds(new Set(JSON.parse(savedCompleted)));
-        }
-    } catch (e) {
-        console.error("Failed to load completed puzzles", e);
-    }
-
-    // 1. Streak Logic
-    try {
-        const storedStreak = parseInt(localStorage.getItem('mosaic_streak') || '0');
-        const lastWin = localStorage.getItem('mosaic_last_win');
-        const today = new Date().toDateString();
-        const yesterday = new Date(Date.now() - 86400000).toDateString();
-
-        if (lastWin && lastWin !== today && lastWin !== yesterday) {
-            setStreak(0);
-            localStorage.setItem('mosaic_streak', '0');
-        } else {
-            setStreak(storedStreak);
-        }
-    } catch(e) {}
-
-    // 1.5 Generate Dynamic Daily Puzzle
-    const today = new Date().toDateString();
-    const dateSeed = today.replace(/ /g, '-');
-    setDailyPuzzle({
-        id: `daily-${dateSeed}`,
-        title: `Daily Challenge: ${new Date().toLocaleDateString(undefined, { month: 'long', day: 'numeric' })}`,
-        src: `https://picsum.photos/seed/${dateSeed}/800/800`,
-        difficulty: 'normal',
-        category: 'Daily',
-        isDaily: true
-    });
-
-    const initPuzzles = async () => {
-         // Load Hidden Puzzles
-         let hidden = new Set<string>();
-         try {
-             const hiddenStr = localStorage.getItem('mosaic_hidden_ids');
-             if (hiddenStr) {
-                 hidden = new Set(JSON.parse(hiddenStr));
-                 setHiddenPuzzleIds(hidden);
-             }
-         } catch(e) { console.error(e); }
-
-         let storedDiscoveries: PuzzleConfig[] = [];
-         
-         // Load Discoveries
-         try {
-            const storedDiscoveriesStr = localStorage.getItem('mosaic_discoveries');
-            if (storedDiscoveriesStr) {
-                const parsed = JSON.parse(storedDiscoveriesStr);
-                if (Array.isArray(parsed)) storedDiscoveries = parsed;
-            }
-         } catch (e) {
-             localStorage.removeItem('mosaic_discoveries');
-         }
-
-         // Generate New Discovery if needed
-         const getPicsumId = (url: string) => {
-            if (!url) return -1;
-            const match = url.match(/\/id\/(\d+)\//);
-            return match ? parseInt(match[1]) : -1;
-        };
-
-        const usedIds = new Set<number>();
-        [...INITIAL_PUZZLES, ...storedDiscoveries].forEach(p => {
-            if (p && p.src) {
-                const id = getPicsumId(p.src);
-                if (id !== -1) usedIds.add(id);
-            }
-        });
-
-        let newId = -1;
-        let attempts = 0;
-        while (attempts < 50) {
-            const candidate = Math.floor(Math.random() * 800) + 10; 
-            if (!usedIds.has(candidate)) {
-                newId = candidate;
-                break;
-            }
-            attempts++;
-        }
-
-        if (newId !== -1) {
-            const adjectives = ["Hidden", "Silent", "Cosmic", "Vibrant", "Misty", "Ancient", "Glass", "Neon", "Rustic", "Golden", "Ethereal", "Quiet", "Frozen", "Blooming"];
-            const nouns = ["Fragment", "Vista", "Echo", "Dream", "Horizon", "Oasis", "Whisper", "Journey", "Valley", "Light", "Shadow", "River", "Summit", "Harbor"];
-            const randomTitle = `${adjectives[Math.floor(Math.random() * adjectives.length)]} ${nouns[Math.floor(Math.random() * nouns.length)]}`;
-
-            const newPuzzle: PuzzleConfig = {
-                id: `discovery-${Date.now()}`,
-                title: randomTitle,
-                src: `https://picsum.photos/id/${newId}/800/800`,
-                difficulty: 'normal',
-                category: 'Discovery'
-            };
-
-            storedDiscoveries = [newPuzzle, ...storedDiscoveries];
-            try {
-                localStorage.setItem('mosaic_discoveries', JSON.stringify(storedDiscoveries));
-            } catch(e) {}
-        }
-
-        // Load User Uploads
-        const userUploads = await loadUserUploadedPuzzles();
-
-        // Sync categories from uploads
-        const uploadCategories = new Set(userUploads.map(p => p.category));
-        setCategories(prev => {
-            const newCats = new Set(prev);
-            let changed = false;
-            uploadCategories.forEach(c => {
-                if (!newCats.has(c)) {
-                    newCats.add(c);
-                    changed = true;
-                }
-            });
-            return changed ? Array.from(newCats) : prev;
-        });
-
-        let allPuzzles = [...INITIAL_PUZZLES, ...storedDiscoveries, ...userUploads];
-        
-        // Randomize difficulty for unsolved puzzles
-        const difficulties: Difficulty[] = ['easy', 'normal', 'hard', 'expert'];
-        // We need to use the locally loaded completed set because state update is async
-        let currentCompleted = new Set<string>();
+    const initializeApp = async () => {
         try {
-            const savedCompleted = localStorage.getItem('mosaic_completed_ids');
-            if (savedCompleted) {
-                currentCompleted = new Set(JSON.parse(savedCompleted));
-            }
-        } catch (e) {}
+            // 1. Check Database Integrity & Rebuild if needed
+            console.log("Checking database integrity...");
+            const report = await rebuildDatabase();
+            console.log(report);
 
-        allPuzzles = allPuzzles.map(p => {
-            if (!currentCompleted.has(p.id)) {
-                const randomDiff = difficulties[Math.floor(Math.random() * difficulties.length)];
-                return { ...p, difficulty: randomDiff };
-            }
-            return p;
-        });
+            // 2. Load Generated Images
+            const genImages = await loadSavedGeneratedPuzzles();
+            setGeneratedImages(genImages);
 
-        // Filter out hidden puzzles
-        setGalleryPuzzles(allPuzzles.filter(p => !hidden.has(p.id)));
+            // 3. Load User Data & Puzzles
+            checkForSavedGames();
+
+            // Load Completed Puzzles
+            try {
+                const savedCompleted = localStorage.getItem('mosaic_completed_ids');
+                if (savedCompleted) {
+                    setCompletedPuzzleIds(new Set(JSON.parse(savedCompleted)));
+                }
+            } catch (e) {
+                console.error("Failed to load completed puzzles", e);
+            }
+
+            // Streak Logic
+            try {
+                const storedStreak = parseInt(localStorage.getItem('mosaic_streak') || '0');
+                const lastWin = localStorage.getItem('mosaic_last_win');
+                const today = new Date().toDateString();
+                const yesterday = new Date(Date.now() - 86400000).toDateString();
+
+                if (lastWin && lastWin !== today && lastWin !== yesterday) {
+                    setStreak(0);
+                    localStorage.setItem('mosaic_streak', '0');
+                } else {
+                    setStreak(storedStreak);
+                }
+            } catch(e) {}
+
+            // Generate Daily Puzzle
+            const today = new Date().toDateString();
+            const dateSeed = today.replace(/ /g, '-');
+            setDailyPuzzle({
+                id: `daily-${dateSeed}`,
+                title: `Daily Challenge: ${new Date().toLocaleDateString(undefined, { month: 'long', day: 'numeric' })}`,
+                src: `https://picsum.photos/seed/${dateSeed}/800/800`,
+                difficulty: 'normal',
+                category: 'Daily',
+                isDaily: true
+            });
+
+            // Load Puzzles (Hidden, Discoveries, User Uploads)
+            // Load Hidden Puzzles
+            let hidden = new Set<string>();
+            try {
+                const hiddenStr = localStorage.getItem('mosaic_hidden_ids');
+                if (hiddenStr) {
+                    hidden = new Set(JSON.parse(hiddenStr));
+                    setHiddenPuzzleIds(hidden);
+                }
+            } catch(e) { console.error(e); }
+
+            let storedDiscoveries: PuzzleConfig[] = [];
+            
+            // Load Discoveries
+            try {
+               const storedDiscoveriesStr = localStorage.getItem('mosaic_discoveries');
+               if (storedDiscoveriesStr) {
+                   const parsed = JSON.parse(storedDiscoveriesStr);
+                   if (Array.isArray(parsed)) storedDiscoveries = parsed;
+               }
+            } catch (e) {
+                localStorage.removeItem('mosaic_discoveries');
+            }
+
+            // Generate New Discovery if needed
+            const getPicsumId = (url: string) => {
+               if (!url) return -1;
+               const match = url.match(/\/id\/(\d+)\//);
+               return match ? parseInt(match[1]) : -1;
+           };
+
+           const usedIds = new Set<number>();
+           [...INITIAL_PUZZLES, ...storedDiscoveries].forEach(p => {
+               if (p && p.src) {
+                   const id = getPicsumId(p.src);
+                   if (id !== -1) usedIds.add(id);
+               }
+           });
+
+           let newId = -1;
+           let attempts = 0;
+           while (attempts < 50) {
+               const candidate = Math.floor(Math.random() * 800) + 10; 
+               if (!usedIds.has(candidate)) {
+                   newId = candidate;
+                   break;
+               }
+               attempts++;
+           }
+
+           if (newId !== -1) {
+               const adjectives = ["Hidden", "Silent", "Cosmic", "Vibrant", "Misty", "Ancient", "Glass", "Neon", "Rustic", "Golden", "Ethereal", "Quiet", "Frozen", "Blooming"];
+               const nouns = ["Fragment", "Vista", "Echo", "Dream", "Horizon", "Oasis", "Whisper", "Journey", "Valley", "Light", "Shadow", "River", "Summit", "Harbor"];
+               const randomTitle = `${adjectives[Math.floor(Math.random() * adjectives.length)]} ${nouns[Math.floor(Math.random() * nouns.length)]}`;
+
+               const newPuzzle: PuzzleConfig = {
+                   id: `discovery-${Date.now()}`,
+                   title: randomTitle,
+                   src: `https://picsum.photos/id/${newId}/800/800`,
+                   difficulty: 'normal',
+                   category: 'Discovery'
+               };
+
+               storedDiscoveries = [newPuzzle, ...storedDiscoveries];
+               try {
+                   localStorage.setItem('mosaic_discoveries', JSON.stringify(storedDiscoveries));
+               } catch(e) {}
+           }
+
+           // Load User Uploads (NOW SAFE because rebuildDatabase ran first)
+           const userUploads = await loadUserUploadedPuzzles();
+
+           // Sync categories from uploads
+           const uploadCategories = new Set(userUploads.map(p => p.category));
+           setCategories(prev => {
+               const newCats = new Set(prev);
+               let changed = false;
+               uploadCategories.forEach(c => {
+                   if (!newCats.has(c)) {
+                       newCats.add(c);
+                       changed = true;
+                   }
+               });
+               return changed ? Array.from(newCats) : prev;
+           });
+
+           let allPuzzles = [...INITIAL_PUZZLES, ...storedDiscoveries, ...userUploads];
+           
+           // Randomize difficulty for unsolved puzzles
+           const difficulties: Difficulty[] = ['easy', 'normal', 'hard', 'expert'];
+           // We need to use the locally loaded completed set because state update is async
+           let currentCompleted = new Set<string>();
+           try {
+               const savedCompleted = localStorage.getItem('mosaic_completed_ids');
+               if (savedCompleted) {
+                   currentCompleted = new Set(JSON.parse(savedCompleted));
+               }
+           } catch (e) {}
+
+           allPuzzles = allPuzzles.map(p => {
+               if (!currentCompleted.has(p.id)) {
+                   const randomDiff = difficulties[Math.floor(Math.random() * difficulties.length)];
+                   return { ...p, difficulty: randomDiff };
+               }
+               return p;
+           });
+
+           // Filter out hidden puzzles
+           setGalleryPuzzles(allPuzzles.filter(p => !hidden.has(p.id)));
+
+        } catch (e) {
+            console.error("Initialization Failed", e);
+            setError({ title: "Startup Error", message: "Failed to initialize application. Please refresh." });
+        } finally {
+            setIsInitializing(false);
+        }
     };
 
-    if (!initializationRef.current) {
-        initializationRef.current = true;
-        initPuzzles();
-    }
+    initializeApp();
   }, []);
 
   // Update saved games when view changes
@@ -1351,6 +1363,18 @@ const App: React.FC = () => {
         onComplete={handlePuzzleComplete}
       />
     );
+  }
+
+  if (isInitializing) {
+      return (
+          <div className="fixed inset-0 flex flex-col items-center justify-center bg-slate-50 z-50">
+              <div className="animate-spin text-indigo-600 mb-4">
+                  <RotateCw size={48} />
+              </div>
+              <h2 className="text-xl font-serif font-bold text-slate-800">Initializing Database...</h2>
+              <p className="text-slate-500 mt-2">Checking for offline content</p>
+          </div>
+      );
   }
 
   return (
