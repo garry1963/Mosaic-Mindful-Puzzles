@@ -135,11 +135,11 @@ export const loadSavedGeneratedPuzzles = async (): Promise<GeneratedImage[]> => 
     try {
         const all = await loadAllPuzzlesFromDB();
         return all.filter(p => p.isAi).map(p => ({
+            ...p,
             id: p.id,
             title: p.title,
             isAi: true,
-            src: URL.createObjectURL(p.thumbBlob),
-            ...p
+            src: URL.createObjectURL(p.thumbBlob)
         } as GeneratedImage));
     } catch (error) {
         console.error("Failed to load generated puzzles", error);
@@ -185,13 +185,13 @@ export const loadUserUploadedPuzzles = async (): Promise<PuzzleConfig[]> => {
 
         const all = await loadAllPuzzlesFromDB();
         return all.filter(p => p.isUserUpload).map(p => ({
+            ...p,
             id: p.id,
             title: p.title,
             category: p.category,
             difficulty: p.difficulty as any,
             isUserUpload: true,
-            src: URL.createObjectURL(p.thumbBlob),
-            ...p
+            src: URL.createObjectURL(p.thumbBlob)
         } as PuzzleConfig));
     } catch (e) {
         console.error("Failed to load user uploads", e);

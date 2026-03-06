@@ -1143,6 +1143,21 @@ const App: React.FC = () => {
                >
                    All Puzzles
                </button>
+               <button 
+                 onClick={() => setActiveCategory('Offline Ready')}
+                 className={`w-full text-left px-4 py-3 rounded-xl font-medium transition-colors flex items-center gap-2 ${activeCategory === 'Offline Ready' ? 'bg-indigo-50 text-indigo-700' : 'text-slate-600 hover:bg-slate-50'}`}
+               >
+                   <CloudDownload size={16} /> Offline Ready
+               </button>
+               <button 
+                 onClick={() => setActiveCategory('My Uploads')}
+                 className={`w-full text-left px-4 py-3 rounded-xl font-medium transition-colors flex items-center gap-2 ${activeCategory === 'My Uploads' ? 'bg-indigo-50 text-indigo-700' : 'text-slate-600 hover:bg-slate-50'}`}
+               >
+                   <Upload size={16} /> My Uploads
+               </button>
+               
+               <div className="my-2 border-t border-slate-100"></div>
+
                {categories.map(cat => (
                    <div key={cat} className="group relative">
                        <button 
@@ -1179,6 +1194,18 @@ const App: React.FC = () => {
                 >
                     All
                 </button>
+                <button 
+                    onClick={() => setActiveCategory('Offline Ready')}
+                    className={`px-4 py-2 rounded-full text-sm font-bold border transition-colors flex items-center gap-1 ${activeCategory === 'Offline Ready' ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-slate-600 border-slate-200'}`}
+                >
+                    <CloudDownload size={14} /> Offline
+                </button>
+                <button 
+                    onClick={() => setActiveCategory('My Uploads')}
+                    className={`px-4 py-2 rounded-full text-sm font-bold border transition-colors flex items-center gap-1 ${activeCategory === 'My Uploads' ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-slate-600 border-slate-200'}`}
+                >
+                    <Upload size={14} /> Uploads
+                </button>
                 {categories.map(cat => (
                     <button 
                         key={cat}
@@ -1210,7 +1237,12 @@ const App: React.FC = () => {
         <main className="flex-1 overflow-y-auto p-4 md:p-8 pt-16 md:pt-8 bg-slate-50 scroll-smooth custom-scrollbar">
              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4 md:gap-6 pb-32">
                  {galleryPuzzles
-                    .filter(p => activeCategory === 'All' || p.category === activeCategory)
+                    .filter(p => {
+                        if (activeCategory === 'All') return true;
+                        if (activeCategory === 'Offline Ready') return p.isUserUpload || (p.src && p.src.startsWith('blob:')) || !!thumbnails[p.id];
+                        if (activeCategory === 'My Uploads') return p.isUserUpload;
+                        return p.category === activeCategory;
+                    })
                     .filter(p => {
                         if (!isOfflineMode) return true;
                         // In offline mode, only show puzzles that have a local thumbnail/blob
@@ -1246,6 +1278,12 @@ const App: React.FC = () => {
                              {isCompleted && (
                                  <div className="absolute top-2 right-2 bg-emerald-500 text-white p-1.5 rounded-full shadow-lg z-10">
                                      <Check size={12} strokeWidth={3} />
+                                 </div>
+                             )}
+
+                             {isAvailableLocally && !isCompleted && (
+                                 <div className="absolute top-2 right-2 bg-white/90 text-indigo-600 p-1.5 rounded-full shadow-lg z-10" title="Available Offline">
+                                     <CloudDownload size={12} strokeWidth={3} />
                                  </div>
                              )}
 
