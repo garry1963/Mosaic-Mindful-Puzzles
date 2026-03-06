@@ -1,5 +1,12 @@
 import { PuzzleConfig, GeneratedImage } from "../types";
-import { getImageFromDB, saveImageToDB, deleteImageFromDB, getBatchImagesFromDB, getAllImagesFromDB, ImageRecord } from "../utils/db";
+import { 
+    savePuzzleToDB, 
+    loadAllPuzzlesFromDB, 
+    getFullImageFromDB, 
+    deletePuzzleFromDB,
+    migrateLegacyData,
+    PuzzleRecord
+} from "../utils/storage";
 
 // Helper to generate a thumbnail blob from a source blob
 export const generateThumbnail = (sourceBlob: Blob, size: number = 300): Promise<Blob> => {
@@ -36,12 +43,13 @@ export const generateThumbnail = (sourceBlob: Blob, size: number = 300): Promise
 
 // Batch check for existing images
 export const checkImagesExistInDB = async (ids: string[]): Promise<Set<string>> => {
-    const records = await getBatchImagesFromDB(ids);
-    const existing = new Set<string>();
-    records.forEach((r, i) => {
-        if (r) existing.add(ids[i]);
+    const allPuzzles = await loadAllPuzzlesFromDB();
+    const existingIds = new Set(allPuzzles.map(p => p.id));
+    const result = new Set<string>();
+    ids.forEach(id => {
+        if (existingIds.has(id)) result.add(id);
     });
-    return existing;
+    return result;
 };
 
 // The "Scraper" Function
@@ -49,17 +57,27 @@ export const checkImagesExistInDB = async (ids: string[]): Promise<Set<string>> 
 export const syncPuzzleImage = async (puzzle: PuzzleConfig, forceOffline: boolean = false): Promise<{ thumbUrl: string; isLocal: boolean }> => {
     try {
         // 1. Check Local DB
-        const record = await getImageFromDB(puzzle.id);
-        if (record) {
-            return { 
-                thumbUrl: URL.createObjectURL(record.thumbBlob), 
-                isLocal: true 
-            };
+        const localBlob = await getFullImageFromDB(puzzle.id);
+        
+        if (localBlob) {
+             // We need a thumbnail. 
+             const all = await loadAllPuzzlesFromDB();
+             const record = all.find(p => p.id === puzzle.id);
+             if (record && record.thumbBlob) {
+                 return { 
+                     thumbUrl: URL.createObjectURL(record.thumbBlob), 
+                     isLocal: true 
+                 };
+             }
+             // If we have fullBlob but no record (shouldn't happen), generate thumb
+             const thumbBlob = await generateThumbnail(localBlob);
+             return {
+                 thumbUrl: URL.createObjectURL(thumbBlob),
+                 isLocal: true
+             };
         }
 
         // 2. Scrape (Fetch) from Web
-        // Note: This relies on the image source allowing CORS. 
-        // Picsum and LoremFlickr generally allow this.
         if (!navigator.onLine || forceOffline) {
              return { thumbUrl: puzzle.src, isLocal: false };
         }
@@ -67,13 +85,19 @@ export const syncPuzzleImage = async (puzzle: PuzzleConfig, forceOffline: boolea
         const response = await fetch(puzzle.src, { mode: 'cors' });
         if (!response.ok) throw new Error('Network response was not ok');
         
-        const fullBlob = await response.blob();
+        const fetchedBlob = await response.blob();
         
         // 3. Generate Thumbnail
-        const thumbBlob = await generateThumbnail(fullBlob);
+        const thumbBlob = await generateThumbnail(fetchedBlob);
         
         // 4. Store in Database
-        await saveImageToDB(puzzle.id, fullBlob, thumbBlob);
+        await savePuzzleToDB(puzzle.id, fetchedBlob, thumbBlob, {
+            title: puzzle.title,
+            category: puzzle.category,
+            difficulty: puzzle.difficulty,
+            isUserUpload: false,
+            isAi: false
+        });
         
         return { 
             thumbUrl: URL.createObjectURL(thumbBlob), 
@@ -81,16 +105,14 @@ export const syncPuzzleImage = async (puzzle: PuzzleConfig, forceOffline: boolea
         };
 
     } catch (error) {
-        // console.warn(`Could not sync image for ${puzzle.id}`, error);
-        // Fallback to original URL if scraping fails (e.g. offline and not cached)
         return { thumbUrl: puzzle.src, isLocal: false };
     }
 };
 
 export const getFullQualityImage = async (puzzleId: string, fallbackSrc: string): Promise<string> => {
-    const record = await getImageFromDB(puzzleId);
-    if (record) {
-        return URL.createObjectURL(record.fullBlob);
+    const blob = await getFullImageFromDB(puzzleId);
+    if (blob) {
+        return URL.createObjectURL(blob);
     }
     return fallbackSrc;
 };
@@ -101,60 +123,24 @@ export const saveGeneratedPuzzle = async (id: string, base64Data: string, metada
     const response = await fetch(base64Data);
     const blob = await response.blob();
     // Save to IndexedDB (using same blob for full and thumb to ensure quality)
-    await saveImageToDB(id, blob, blob, metadata);
+    await savePuzzleToDB(id, blob, blob, {
+        ...metadata,
+        isAi: true,
+        title: metadata?.prompt || 'Generated Image'
+    });
     return URL.createObjectURL(blob);
 };
 
 export const loadSavedGeneratedPuzzles = async (): Promise<GeneratedImage[]> => {
     try {
-        // 1. Check for Legacy Data (Base64 in LocalStorage) to migrate
-        const legacyData = localStorage.getItem('mosaic_generated_images');
-        if (legacyData) {
-            try {
-                const legacyImages: GeneratedImage[] = JSON.parse(legacyData);
-                const migratedImages: GeneratedImage[] = [];
-
-                // Migrate each image to IndexedDB
-                for (const img of legacyImages) {
-                    // Only migrate if it looks like a base64 string
-                    if (img.src && img.src.startsWith('data:')) {
-                        const objectUrl = await saveGeneratedPuzzle(img.id, img.src);
-                        migratedImages.push({ ...img, src: objectUrl });
-                    }
-                }
-                
-                // Save clean metadata
-                const metadata = migratedImages.map(({ src, ...rest }) => rest);
-                localStorage.setItem('mosaic_generated_metadata', JSON.stringify(metadata));
-                
-                // Remove legacy key
-                localStorage.removeItem('mosaic_generated_images');
-                
-                return migratedImages;
-            } catch (e) {
-                console.error("Migration failed, clearing legacy data", e);
-                localStorage.removeItem('mosaic_generated_images');
-            }
-        }
-
-        // 2. Normal Load (Metadata + IndexedDB)
-        const metaStr = localStorage.getItem('mosaic_generated_metadata');
-        if (!metaStr) return [];
-
-        const metadata: Omit<GeneratedImage, 'src'>[] = JSON.parse(metaStr);
-        // Robustness fix: Load all to ensure matching
-        const allRecords = await getAllImagesFromDB();
-        
-        const results: GeneratedImage[] = [];
-        metadata.forEach(m => {
-            const record = allRecords.find(r => r.id === m.id);
-            if (record) {
-                results.push({ ...m, src: URL.createObjectURL(record.fullBlob) });
-            }
-        });
-        
-        return results;
-
+        const all = await loadAllPuzzlesFromDB();
+        return all.filter(p => p.isAi).map(p => ({
+            id: p.id,
+            title: p.title,
+            isAi: true,
+            src: URL.createObjectURL(p.thumbBlob),
+            ...p
+        } as GeneratedImage));
     } catch (error) {
         console.error("Failed to load generated puzzles", error);
         return [];
@@ -162,26 +148,11 @@ export const loadSavedGeneratedPuzzles = async (): Promise<GeneratedImage[]> => 
 };
 
 export const deleteGeneratedPuzzle = async (id: string): Promise<void> => {
-    // 1. Remove from Metadata
-    const metaStr = localStorage.getItem('mosaic_generated_metadata');
-    if (metaStr) {
-        const metadata: any[] = JSON.parse(metaStr);
-        const updated = metadata.filter((p: any) => p.id !== id);
-        localStorage.setItem('mosaic_generated_metadata', JSON.stringify(updated));
-    }
-
-    // 2. Remove from DB
-    await deleteImageFromDB(id);
+    await deletePuzzleFromDB(id);
 };
 
 export const persistGeneratedMetadata = (images: GeneratedImage[]) => {
-    try {
-        // Only save metadata, not the Object URL src
-        const metadata = images.map(({ src, ...rest }) => rest);
-        localStorage.setItem('mosaic_generated_metadata', JSON.stringify(metadata));
-    } catch (e) {
-        console.error("Failed to save metadata", e);
-    }
+    // No-op: Metadata is persisted in DB on save
 };
 
 // --- User Uploaded Puzzle Storage ---
@@ -190,51 +161,38 @@ export const saveUserUploadedPuzzle = async (file: File, title: string, category
     const id = `upload-${Date.now()}`;
     const thumbBlob = await generateThumbnail(file);
     
-    // Save to DB
     const puzzleConfig: PuzzleConfig = {
         id,
-        src: URL.createObjectURL(file), // Temporary URL for immediate use
+        src: '', // Placeholder, will be replaced by blob URL on load
         title,
         category,
         difficulty: 'normal',
         isUserUpload: true
     };
     
-    await saveImageToDB(id, file, thumbBlob, puzzleConfig);
+    await savePuzzleToDB(id, file, thumbBlob, puzzleConfig);
     
-    // Load existing metadata
-    const existingStr = localStorage.getItem('mosaic_user_uploads');
-    const existing: PuzzleConfig[] = existingStr ? JSON.parse(existingStr) : [];
-    
-    // Save metadata (excluding transient src)
-    const toSave = [{...puzzleConfig, src: ''}, ...existing];
-    localStorage.setItem('mosaic_user_uploads', JSON.stringify(toSave));
-    
-    return puzzleConfig;
+    return {
+        ...puzzleConfig,
+        src: URL.createObjectURL(thumbBlob) // Return valid URL for immediate UI update
+    };
 };
 
 export const loadUserUploadedPuzzles = async (): Promise<PuzzleConfig[]> => {
     try {
-        const metaStr = localStorage.getItem('mosaic_user_uploads');
-        if (!metaStr) return [];
-        
-        const metadata: PuzzleConfig[] = JSON.parse(metaStr);
-        // Robustness fix: Instead of batch get, load all and match. 
-        // This ensures we don't miss items due to key lookup issues and is safer for recovery.
-        const allRecords = await getAllImagesFromDB();
-        
-        const results: PuzzleConfig[] = [];
-        
-        metadata.forEach(m => {
-            const record = allRecords.find(r => r.id === m.id);
-            if (record) {
-                // Determine which blob to use based on context, but here we just need a valid URL
-                // We use thumb for list, full for game. Logic in app handles getFullQualityImage.
-                // We provide thumb URL initially as 'src' for Gallery performance.
-                results.push({ ...m, src: URL.createObjectURL(record.thumbBlob) });
-            }
-        });
-        return results;
+        // Trigger migration once
+        await migrateLegacyData();
+
+        const all = await loadAllPuzzlesFromDB();
+        return all.filter(p => p.isUserUpload).map(p => ({
+            id: p.id,
+            title: p.title,
+            category: p.category,
+            difficulty: p.difficulty as any,
+            isUserUpload: true,
+            src: URL.createObjectURL(p.thumbBlob),
+            ...p
+        } as PuzzleConfig));
     } catch (e) {
         console.error("Failed to load user uploads", e);
         return [];
@@ -242,93 +200,5 @@ export const loadUserUploadedPuzzles = async (): Promise<PuzzleConfig[]> => {
 };
 
 export const deleteUserUploadedPuzzle = async (id: string): Promise<void> => {
-    // 1. Remove from Metadata
-    const metaStr = localStorage.getItem('mosaic_user_uploads');
-    if (metaStr) {
-        const metadata: PuzzleConfig[] = JSON.parse(metaStr);
-        const updated = metadata.filter(p => p.id !== id);
-        localStorage.setItem('mosaic_user_uploads', JSON.stringify(updated));
-    }
-
-    // 2. Remove from DB
-    await deleteImageFromDB(id);
+    await deletePuzzleFromDB(id);
 };
-
-// --- Database Reconciliation (Data Recovery) ---
-
-export const rebuildDatabase = async (): Promise<string> => {
-    try {
-        const allRecords = await getAllImagesFromDB();
-        if (allRecords.length === 0) return "Database is empty. Nothing to recover.";
-
-        const newUploads: PuzzleConfig[] = [];
-        const newGens: GeneratedImage[] = [];
-        let recoveredCount = 0;
-
-        for (const record of allRecords) {
-            // 1. Handle User Uploads
-            if (record.id.startsWith('upload-')) {
-                let restored: PuzzleConfig;
-                if (record.metadata && record.metadata.title) {
-                    restored = { ...record.metadata, src: '' };
-                    if (!restored.category) restored.category = 'Recovered';
-                } else {
-                    restored = {
-                        id: record.id,
-                        title: 'Recovered Puzzle',
-                        category: 'Recovered',
-                        difficulty: 'normal',
-                        isUserUpload: true,
-                        src: ''
-                    };
-                }
-                newUploads.push(restored);
-                recoveredCount++;
-            }
-            // 2. Handle Generated Images
-            else if (record.id.startsWith('gen-')) {
-                let restored: GeneratedImage;
-                if (record.metadata && record.metadata.prompt) {
-                    restored = { ...record.metadata, src: '' };
-                } else {
-                    restored = {
-                        id: record.id,
-                        prompt: 'Recovered Image',
-                        src: '',
-                        timestamp: record.timestamp || Date.now()
-                    };
-                }
-                newGens.push(restored);
-                recoveredCount++;
-            }
-        }
-
-        // Force overwrite metadata with what we found in DB
-        localStorage.setItem('mosaic_user_uploads', JSON.stringify(newUploads));
-        localStorage.setItem('mosaic_generated_metadata', JSON.stringify(newGens));
-
-        // Sync Categories immediately
-        const existingCatsStr = localStorage.getItem('mosaic_custom_categories');
-        const existingCats: string[] = existingCatsStr ? JSON.parse(existingCatsStr) : [];
-        const newCats = new Set(existingCats);
-        let catsChanged = false;
-        
-        newUploads.forEach(p => {
-            if (p.category && !newCats.has(p.category)) {
-                newCats.add(p.category);
-                catsChanged = true;
-            }
-        });
-
-        if (catsChanged) {
-            localStorage.setItem('mosaic_custom_categories', JSON.stringify(Array.from(newCats)));
-        }
-
-        return `Database Rebuilt Successfully.\n\nSynced ${newUploads.length} uploads.\nSynced ${newGens.length} generated images.\nTotal records: ${recoveredCount}`;
-
-    } catch (e) {
-        console.error("Database rebuild failed", e);
-        return `Database Rebuild Failed: ${e}`;
-    }
-};
-

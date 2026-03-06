@@ -2,10 +2,11 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Home, Puzzle, Settings, Image as ImageIcon, Sparkles, Clock, ArrowLeft, RotateCcw, Flame, Play, ChevronRight, Wand2, History, Layers, HelpCircle, X, MousePointer2, RotateCw, Shapes, Eye, Lightbulb, Zap, Check, CloudDownload, WifiOff, Wifi, Activity, AlertTriangle, Upload, Plus, Trash2 } from 'lucide-react';
 import GameBoard from './components/GameBoard';
 import { generateImage } from './services/geminiService';
-import { syncPuzzleImage, getFullQualityImage, saveGeneratedPuzzle, loadSavedGeneratedPuzzles, persistGeneratedMetadata, saveUserUploadedPuzzle, loadUserUploadedPuzzles, deleteUserUploadedPuzzle, deleteGeneratedPuzzle, checkImagesExistInDB, rebuildDatabase } from './services/offlineStorage';
+import { syncPuzzleImage, getFullQualityImage, saveGeneratedPuzzle, loadSavedGeneratedPuzzles, persistGeneratedMetadata, saveUserUploadedPuzzle, loadUserUploadedPuzzles, deleteUserUploadedPuzzle, deleteGeneratedPuzzle, checkImagesExistInDB } from './services/offlineStorage';
 import { loadUserStats, formatTime, resetBestTimes, resetBestTimeForDifficulty } from './services/statsService';
 import { GameState, Difficulty, PuzzleConfig, AppView, GeneratedImage, UserStats } from './types';
 import { INITIAL_PUZZLES } from './constants';
+import { DiagnosticsModal } from './components/DiagnosticsModal';
 
 const INITIAL_CATEGORIES = ['Classic Cars', 'Animals', 'Cats', 'Disney Characters', 'Historical Buildings', 'People', 'Abstract', 'Nature', 'Urban', 'Spring', 'Summer', 'Autumn', 'Winter', 'Indoor', 'Fine Art & Masterpieces', 'Icons & Logos', 'Movies & TV Shows', 'Album Covers', 'Abstract & Colour Gradients'];
 
@@ -17,6 +18,7 @@ const DIFFICULTY_RANK: Record<string, number> = {
 };
 
 const App: React.FC = () => {
+  const [showDiagnostics, setShowDiagnostics] = useState(false);
   const [categories, setCategories] = useState<string[]>(INITIAL_CATEGORIES);
   const [showCategoryModal, setShowCategoryModal] = useState(false);
   const [newCategoryName, setNewCategoryName] = useState('');
@@ -255,12 +257,7 @@ const App: React.FC = () => {
 
     const initializeApp = async () => {
         try {
-            // 1. Check Database Integrity & Rebuild if needed
-            console.log("Checking database integrity...");
-            const report = await rebuildDatabase();
-            console.log(report);
-
-            // 2. Load Generated Images
+            // 1. Load Generated Images
             const genImages = await loadSavedGeneratedPuzzles();
             setGeneratedImages(genImages);
 
@@ -373,7 +370,7 @@ const App: React.FC = () => {
                } catch(e) {}
            }
 
-           // Load User Uploads (NOW SAFE because rebuildDatabase ran first)
+           // Load User Uploads (Safe: Uses persistent IndexedDB metadata)
            const userUploads = await loadUserUploadedPuzzles();
 
            // Sync categories from uploads
@@ -927,6 +924,22 @@ const App: React.FC = () => {
                   </div>
               </div>
           )}
+
+          {/* Diagnostics Button */}
+          <button 
+              onClick={() => setShowDiagnostics(true)}
+              className="flex items-center gap-3 px-4 py-3 bg-white/90 backdrop-blur-md rounded-2xl shadow-sm border border-slate-200/60 transition-all hover:scale-105 select-none delay-100 animate-in fade-in slide-in-from-left-2 text-left"
+          >
+              <div className="bg-indigo-50 text-indigo-500 p-1 rounded-md">
+                  <Activity size={14} />
+              </div>
+              <div className="flex flex-col">
+                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider leading-none mb-0.5">System</span>
+                  <span className="text-xs font-bold text-slate-700 leading-none">
+                      Diagnostics
+                  </span>
+              </div>
+          </button>
       </div>
 
       <button 
@@ -1424,6 +1437,8 @@ const App: React.FC = () => {
               </div>
           </div>
       )}
+
+      <DiagnosticsModal isOpen={showDiagnostics} onClose={() => setShowDiagnostics(false)} />
 
       {/* Global Error Toast */}
       {error && (
