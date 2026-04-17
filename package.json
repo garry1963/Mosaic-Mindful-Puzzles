@@ -4,20 +4,31 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
-    "build": "vite build",
+    "dev": "tsx server.ts",
+    "build": "vite build && esbuild server.ts --bundle --platform=node --target=node22 --outfile=dist/server.cjs --external:sqlite3 --external:typeorm --external:express --external:multer --external:vite",
+    "start": "node dist/server.cjs",
     "preview": "vite preview"
   },
   "dependencies": {
     "@google/genai": "^1.40.0",
+    "express": "^5.2.1",
     "framer-motion": "^12.35.0",
     "lucide-react": "^0.563.0",
+    "multer": "^2.1.1",
     "react": "^19.2.4",
-    "react-dom": "^19.2.4"
+    "react-dom": "^19.2.4",
+    "reflect-metadata": "^0.2.2",
+    "sqlite3": "^5.1.7",
+    "typeorm": "^0.3.28"
   },
   "devDependencies": {
+    "@types/express": "^5.0.6",
+    "@types/multer": "^2.1.0",
     "@types/node": "^22.14.0",
+    "@types/sqlite3": "^3.1.11",
     "@vitejs/plugin-react": "^5.0.0",
+    "esbuild": "^0.28.0",
+    "tsx": "^4.21.0",
     "typescript": "~5.8.2",
     "vite": "^6.2.0"
   }

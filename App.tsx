@@ -3,6 +3,7 @@ import { Home, Puzzle, Settings, Image as ImageIcon, Sparkles, Clock, ArrowLeft,
 import GameBoard from './components/GameBoard';
 import { generateImage } from './services/pexelsService';
 import { syncPuzzleImage, getFullQualityImage, saveGeneratedPuzzle, loadSavedGeneratedPuzzles, persistGeneratedMetadata, saveUserUploadedPuzzle, loadUserUploadedPuzzles, deleteUserUploadedPuzzle, deleteGeneratedPuzzle, checkImagesExistInDB, updatePuzzleMetadataInDB } from './services/offlineStorage';
+import { rebuildDatabase } from './utils/storage';
 import { loadUserStats, formatTime, resetBestTimes, resetBestTimeForDifficulty } from './services/statsService';
 import { initializeQuests, claimReward } from './services/questService';
 import { GameState, Difficulty, PuzzleConfig, AppView, GeneratedImage, UserStats } from './types';
