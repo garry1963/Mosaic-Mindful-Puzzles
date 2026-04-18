@@ -24,8 +24,18 @@ const blobToBase64 = (blob: Blob): Promise<string> => {
 };
 
 const base64ToBlob = async (base64: string): Promise<Blob> => {
-    const res = await fetch(base64);
-    return await res.blob();
+    if (!base64.includes(';base64,')) {
+        return new Blob();
+    }
+    const parts = base64.split(';base64,');
+    const mime = parts[0].split(':')[1];
+    const bstr = atob(parts[1]);
+    let n = bstr.length;
+    const u8arr = new Uint8Array(n);
+    while (n--) {
+        u8arr[n] = bstr.charCodeAt(n);
+    }
+    return new Blob([u8arr], { type: mime });
 };
 
 export const savePuzzleToDB = async (
@@ -66,7 +76,11 @@ export const loadAllPuzzlesFromDB = async (): Promise<PuzzleRecord[]> => {
         // Convert thumbBase64 back to Blob so frontend doesn't break
         for (const record of data) {
             if (record.thumbBase64) {
-                record.thumbBlob = await base64ToBlob(record.thumbBase64);
+                try {
+                    record.thumbBlob = await base64ToBlob(record.thumbBase64);
+                } catch(err) {
+                    console.error("base64ToBlob failed for", record.id, err);
+                }
             }
         }
         return data;

@@ -70,11 +70,18 @@ export const syncPuzzleImage = async (puzzle: PuzzleConfig, forceOffline: boolea
              // We need a thumbnail. 
              const all = await loadAllPuzzlesFromDB();
              const record = all.find(p => p.id === puzzle.id);
-             if (record && record.thumbBlob) {
-                 return { 
-                     thumbUrl: URL.createObjectURL(record.thumbBlob), 
-                     isLocal: true 
-                 };
+             if (record) {
+                 if (record.thumbBlob) {
+                     return { 
+                         thumbUrl: URL.createObjectURL(record.thumbBlob), 
+                         isLocal: true 
+                     };
+                 } else if (record.thumbBase64) {
+                     return {
+                         thumbUrl: record.thumbBase64,
+                         isLocal: true
+                     };
+                 }
              }
              // If we have fullBlob but no record (shouldn't happen), generate thumb
              const thumbBlob = await generateThumbnail(localBlob);
@@ -141,14 +148,17 @@ export const saveGeneratedPuzzle = async (id: string, base64Data: string, metada
 export const loadSavedGeneratedPuzzles = async (): Promise<GeneratedImage[]> => {
     try {
         const all = await loadAllPuzzlesFromDB();
-        return all.filter(p => p.isAi).map(p => ({
-            ...p,
-            id: p.id,
-            title: p.title,
-            isAi: true,
-            category: p.category,
-            src: URL.createObjectURL(p.thumbBlob)
-        } as GeneratedImage));
+        return all.filter(p => p.isAi).map(p => {
+            const src = p.thumbBlob ? URL.createObjectURL(p.thumbBlob) : (p.thumbBase64 || '');
+            return {
+                ...p,
+                id: p.id,
+                title: p.title,
+                isAi: true,
+                category: p.category,
+                src
+            } as GeneratedImage;
+        });
     } catch (error) {
         console.error("Failed to load generated puzzles", error);
         return [];
@@ -192,15 +202,18 @@ export const loadUserUploadedPuzzles = async (): Promise<PuzzleConfig[]> => {
         await migrateLegacyData();
 
         const all = await loadAllPuzzlesFromDB();
-        return all.filter(p => p.isUserUpload).map(p => ({
-            ...p,
-            id: p.id,
-            title: p.title,
-            category: p.category,
-            difficulty: p.difficulty as any,
-            isUserUpload: true,
-            src: URL.createObjectURL(p.thumbBlob)
-        } as PuzzleConfig));
+        return all.filter(p => p.isUserUpload).map(p => {
+            const src = p.thumbBlob ? URL.createObjectURL(p.thumbBlob) : (p.thumbBase64 || '');
+            return {
+                ...p,
+                id: p.id,
+                title: p.title,
+                category: p.category,
+                difficulty: p.difficulty as any,
+                isUserUpload: true,
+                src
+            } as PuzzleConfig;
+        });
     } catch (e) {
         console.error("Failed to load user uploads", e);
         return [];
