@@ -16,6 +16,7 @@ export const updatePuzzleDifficulty = async (id: string, newDifficulty: string):
         console.error("Failed to update puzzle difficulty in DB:", e);
     }
 };
+
 export const generateThumbnail = (sourceBlob: Blob, size: number = 300): Promise<Blob> => {
     return new Promise((resolve) => {
         const img = new Image();
@@ -64,31 +65,16 @@ export const checkImagesExistInDB = async (ids: string[]): Promise<Set<string>> 
 export const syncPuzzleImage = async (puzzle: PuzzleConfig, forceOffline: boolean = false): Promise<{ thumbUrl: string; isLocal: boolean }> => {
     try {
         // 1. Check Local DB
-        const localBlob = await getFullImageFromDB(puzzle.id);
+        const localUrl = await getFullImageFromDB(puzzle.id);
         
-        if (localBlob) {
+        if (localUrl) {
              // We need a thumbnail. 
              const all = await loadAllPuzzlesFromDB();
              const record = all.find(p => p.id === puzzle.id);
-             if (record) {
-                 if (record.thumbBlob) {
-                     return { 
-                         thumbUrl: URL.createObjectURL(record.thumbBlob), 
-                         isLocal: true 
-                     };
-                 } else if (record.thumbBase64) {
-                     return {
-                         thumbUrl: record.thumbBase64,
-                         isLocal: true
-                     };
-                 }
+             if (record && record.thumbUrl) {
+                 return { thumbUrl: record.thumbUrl, isLocal: true };
              }
-             // If we have fullBlob but no record (shouldn't happen), generate thumb
-             const thumbBlob = await generateThumbnail(localBlob);
-             return {
-                 thumbUrl: URL.createObjectURL(thumbBlob),
-                 isLocal: true
-             };
+             return { thumbUrl: localUrl, isLocal: true }; // fallback to full url if thumb is missing
         }
 
         // 2. Scrape (Fetch) from Web
@@ -124,9 +110,9 @@ export const syncPuzzleImage = async (puzzle: PuzzleConfig, forceOffline: boolea
 };
 
 export const getFullQualityImage = async (puzzleId: string, fallbackSrc: string): Promise<string> => {
-    const blob = await getFullImageFromDB(puzzleId);
-    if (blob) {
-        return URL.createObjectURL(blob);
+    const url = await getFullImageFromDB(puzzleId);
+    if (url) {
+        return url;
     }
     return fallbackSrc;
 };
@@ -136,27 +122,26 @@ export const getFullQualityImage = async (puzzleId: string, fallbackSrc: string)
 export const saveGeneratedPuzzle = async (id: string, base64Data: string, metadata?: any): Promise<string> => {
     const response = await fetch(base64Data);
     const blob = await response.blob();
-    // Save to IndexedDB (using same blob for full and thumb to ensure quality)
+    // Save to server
     await savePuzzleToDB(id, blob, blob, {
         ...metadata,
         isAi: true,
         title: metadata?.prompt || 'Generated Image'
     });
-    return URL.createObjectURL(blob);
+    return URL.createObjectURL(blob); // Return Object URL just for immediate state updates
 };
 
 export const loadSavedGeneratedPuzzles = async (): Promise<GeneratedImage[]> => {
     try {
         const all = await loadAllPuzzlesFromDB();
         return all.filter(p => p.isAi).map(p => {
-            const src = p.thumbBlob ? URL.createObjectURL(p.thumbBlob) : (p.thumbBase64 || '');
             return {
                 ...p,
                 id: p.id,
                 title: p.title,
                 isAi: true,
                 category: p.category,
-                src
+                src: p.thumbUrl || ''
             } as GeneratedImage;
         });
     } catch (error) {
@@ -203,7 +188,6 @@ export const loadUserUploadedPuzzles = async (): Promise<PuzzleConfig[]> => {
 
         const all = await loadAllPuzzlesFromDB();
         return all.filter(p => p.isUserUpload).map(p => {
-            const src = p.thumbBlob ? URL.createObjectURL(p.thumbBlob) : (p.thumbBase64 || '');
             return {
                 ...p,
                 id: p.id,
@@ -211,7 +195,7 @@ export const loadUserUploadedPuzzles = async (): Promise<PuzzleConfig[]> => {
                 category: p.category,
                 difficulty: p.difficulty as any,
                 isUserUpload: true,
-                src
+                src: p.thumbUrl || ''
             } as PuzzleConfig;
         });
     } catch (e) {
