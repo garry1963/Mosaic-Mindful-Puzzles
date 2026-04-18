@@ -111,6 +111,10 @@ async function startServer() {
     // Accept multipart form data uploads
     app.post("/api/puzzles", upload.fields([{ name: 'fullImage' }, { name: 'thumbImage' }]), async (req, res) => {
         try {
+            console.log("POST /api/puzzles - Received request");
+            console.log("Body:", req.body);
+            console.log("Files keys:", Object.keys(req.files || {}));
+            
             const metadata = JSON.parse(req.body.metadata || '{}');
             const files = (req.files || {}) as { [fieldname: string]: Express.Multer.File[] };
             
@@ -120,6 +124,7 @@ async function startServer() {
             let puzzle = await puzzleDao.findOne({ where: { id: req.body.id } });
             
             if (!puzzle) {
+                console.log("Creating new puzzle record for ID:", req.body.id);
                 puzzle = puzzleDao.create({
                     id: req.body.id,
                     title: metadata.title || 'Untitled',
@@ -133,6 +138,7 @@ async function startServer() {
                     ...metadata
                 });
             } else {
+                console.log("Updating existing puzzle record for ID:", req.body.id);
                 // Update existing record
                 puzzleDao.merge(puzzle, metadata);
                 if (thumbFile) puzzle.thumbFilename = thumbFile.filename;
@@ -141,10 +147,11 @@ async function startServer() {
             }
 
             await puzzleDao.save(puzzle);
+            console.log("Saved successfully!");
             res.json({ success: true, puzzle });
         } catch (e: any) {
-            console.error(e);
-            res.status(500).json({ error: e.message });
+            console.error("ERROR IN POST /api/puzzles:", e);
+            res.status(500).json({ error: e.message, stack: e.stack });
         }
     });
 

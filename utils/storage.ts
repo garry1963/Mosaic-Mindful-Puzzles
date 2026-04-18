@@ -34,10 +34,19 @@ export const savePuzzleToDB = async (
     formData.append('fullImage', fullBlob, 'full.jpg');
     formData.append('thumbImage', thumbBlob, 'thumb.jpg');
 
-    await fetch('/api/puzzles', {
+    const response = await fetch('/api/puzzles', {
         method: 'POST',
         body: formData // Note: Content-Type is set automatically for FormData
     });
+
+    if (!response.ok) {
+        const errText = await response.text();
+        throw new Error(`Upload Failed: ${response.status} - ${errText}`);
+    }
+    const data = await response.json();
+    if (!data.success) {
+        throw new Error(`Upload Failed: ${JSON.stringify(data)}`);
+    }
 };
 
 export const loadAllPuzzlesFromDB = async (): Promise<PuzzleRecord[]> => {

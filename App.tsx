@@ -599,9 +599,10 @@ const App: React.FC = () => {
           setUploadTitle('');
           setUploadCategory(categories[0]);
           setActiveCategory(uploadCategory); // Switch to the category we just uploaded to
-      } catch (e) {
+      } catch (e: any) {
           console.error("Upload failed", e);
-          setError({ title: "Upload Failed", message: "Could not save your image(s). Please try again." });
+          const errMessage = e?.message || "Could not save your image(s). Please try again.";
+          setError({ title: "Upload Failed", message: errMessage });
       } finally {
           setIsUploading(false);
       }
