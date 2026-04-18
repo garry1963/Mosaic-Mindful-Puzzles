@@ -9,8 +9,8 @@ const fs = require('fs');
   // Go to app
   await page.goto('http://localhost:3000', { waitUntil: 'networkidle' });
 
-  // Create a 2MB dummy image file exactly to test Nginx limits, but it's local inside container so Nginx doesn't apply to localhost.
-  const largeBuffer = Buffer.alloc(2 * 1024 * 1024, 'a');
+  // Create a 10MB dummy image file
+  const largeBuffer = Buffer.alloc(10 * 1024 * 1024, 'a');
   fs.writeFileSync('test-image.jpg', largeBuffer);
 
   try {
@@ -34,6 +34,19 @@ const fs = require('fs');
 
   // Set category dropdown to "Classic Cars"
   await page.selectOption('select', 'Classic Cars');
+
+  try {
+    // Wait for the button to become enabled
+    await page.waitForFunction(() => {
+      const btns = Array.from(document.querySelectorAll('button'));
+      const btn = btns.find(b => b.textContent && b.textContent.includes('Add to Library'));
+      return btn && !btn.disabled;
+    }, { timeout: 5000 });
+  } catch (e) {
+    console.log("Button never enabled, HTML:");
+    console.log(await page.content());
+    throw e;
+  }
 
   // Click actual upload button
   await page.click('button:has-text("Add to Library")');

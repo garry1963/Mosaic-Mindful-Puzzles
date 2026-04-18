@@ -547,10 +547,10 @@ const App: React.FC = () => {
         const files = Array.from(e.target.files);
         const validFiles: File[] = [];
 
-        // Validate Size (5MB)
+        // Validate type is image
         for (const file of files) {
-            if (file.size > 5 * 1024 * 1024) {
-                alert(`File "${file.name}" is too large. Maximum size is 5MB.`);
+            if (!file.type.startsWith("image/")) {
+                alert(`File "${file.name}" is not a valid image format.`);
                 continue;
             }
             validFiles.push(file);

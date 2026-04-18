@@ -49,6 +49,43 @@ export const generateThumbnail = (sourceBlob: Blob, size: number = 300): Promise
     });
 };
 
+export const resizeImage = (sourceBlob: Blob, maxSize: number = 1920): Promise<Blob> => {
+    return new Promise((resolve) => {
+        const img = new Image();
+        const url = URL.createObjectURL(sourceBlob);
+        
+        img.onload = () => {
+            URL.revokeObjectURL(url);
+            const canvas = document.createElement('canvas');
+            let w = img.width;
+            let h = img.height;
+            
+            let scale = 1;
+            if (w > h && w > maxSize) {
+                scale = maxSize / w;
+            } else if (h > maxSize) {
+                scale = maxSize / h;
+            }
+
+            w = w * scale;
+            h = h * scale;
+
+            canvas.width = w;
+            canvas.height = h;
+            const ctx = canvas.getContext('2d');
+            if (ctx) {
+                ctx.drawImage(img, 0, 0, w, h);
+                // Compress to JPEG 80% to keep size small (usually under 1MB)
+                canvas.toBlob((blob) => resolve(blob || sourceBlob), 'image/jpeg', 0.8);
+            } else {
+                resolve(sourceBlob);
+            }
+        };
+        img.onerror = () => resolve(sourceBlob);
+        img.src = url;
+    });
+};
+
 // Batch check for existing images
 export const checkImagesExistInDB = async (ids: string[]): Promise<Set<string>> => {
     const allPuzzles = await loadAllPuzzlesFromDB();
@@ -163,7 +200,8 @@ export const persistGeneratedMetadata = (images: GeneratedImage[]) => {
 export const saveUserUploadedPuzzle = async (file: File, title: string, category: string): Promise<PuzzleConfig> => {
     const id = `upload-${Date.now()}`;
     const thumbBlob = await generateThumbnail(file);
-    
+    const fullBlob = await resizeImage(file, 1920); // Compress to max 1920px before sending!
+
     const puzzleConfig: PuzzleConfig = {
         id,
         src: '', // Placeholder, will be replaced by blob URL on load
@@ -173,7 +211,7 @@ export const saveUserUploadedPuzzle = async (file: File, title: string, category
         isUserUpload: true
     };
     
-    await savePuzzleToDB(id, file, thumbBlob, puzzleConfig);
+    await savePuzzleToDB(id, fullBlob, thumbBlob, puzzleConfig);
     
     return {
         ...puzzleConfig,
